@@ -9,11 +9,13 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist",
+    "install:global": "bun run build && bun install -g .",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/yargs": "^17.0.35",
     "oxlint": "^1.42.0",
     "typescript": "^5"
   },

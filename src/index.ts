@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+/**
+ * CLI entry point for jenkins-cli.
+ * Registers commands (list, build, status) and handles argument parsing via yargs.
+ */
+import path from "node:path";
 import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { CliError, handleCliError } from "./cli";
@@ -8,9 +13,16 @@ import { runStatus } from "./commands/status";
 import { loadEnv } from "./env";
 import { JenkinsClient } from "./jenkins/client";
 
+const DEFAULT_SCRIPT_NAME = "jenkins-cli";
+const rawScriptName = process.argv[1]
+  ? path.basename(process.argv[1])
+  : DEFAULT_SCRIPT_NAME;
+const scriptName =
+  rawScriptName === "index.ts" ? DEFAULT_SCRIPT_NAME : rawScriptName;
+
 async function main(): Promise<void> {
   const parser = yargs(hideBin(process.argv))
-    .scriptName("jenkins-cli")
+    .scriptName(scriptName)
     .usage("Usage: $0 <command> [options]")
     .option("non-interactive", {
       type: "boolean",

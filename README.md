@@ -11,6 +11,25 @@ Set required environment variables:
 - `JENKINS_USER`
 - `JENKINS_API_TOKEN`
 
+## Setup script
+
+Run the helper script to set env vars and optionally persist them:
+
+```bash
+bash setup.sh
+```
+
+It installs Bun if needed, installs dependencies, installs the CLI globally,
+saves values to `~/.jenkins-cli-env`, and can add a line to your shell profile to
+load them automatically. After saving, open a new terminal or run `. ~/.zshrc`
+(or your chosen profile).
+
+Skip installs and only set env vars:
+
+```bash
+bash setup.sh --no-install
+```
+
 Install dependencies:
 
 ```bash
@@ -29,42 +48,63 @@ Apply fixes:
 bun run lint:fix
 ```
 
+## Global CLI
+
+Build and install once:
+
+```bash
+bun run install:global
+```
+
+Or manually:
+
+```bash
+bun run build
+bun install -g .
+```
+
+If you want a different command name, change the `bin` key in `package.json`,
+rebuild, and reinstall.
+
 ## Usage
+
+If you have not installed the global CLI, replace `jenkins-cli` with
+`bun run src/index.ts` in the commands below.
 
 List jobs (uses local cache by default):
 
 ```bash
-bun run src/index.ts list
+jenkins-cli list
 ```
 
 Refresh the cache from Jenkins:
 
 ```bash
-bun run src/index.ts list --refresh
+jenkins-cli list --refresh
 ```
 
 Search with natural language:
 
 ```bash
-bun run src/index.ts list --search "api prod deploy"
+jenkins-cli list --search "api prod deploy"
 ```
 
 Trigger a build with a branch:
 
 ```bash
-bun run src/index.ts build --job "api-prod" --branch main
+jenkins-cli build --job "api-prod" --branch main
 ```
 
 Use the job's default branch explicitly:
 
 ```bash
-bun run src/index.ts build --job "api-prod" --default-branch
+jenkins-cli build --job "api-prod" --default-branch
 ```
 
 Check status:
 
 ```bash
-bun run src/index.ts status --job "api-prod"
+jenkins-cli status --job "api-prod"
 ```
 
 ## Notes

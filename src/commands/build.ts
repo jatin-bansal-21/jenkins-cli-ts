@@ -1,9 +1,14 @@
+/**
+ * Build command implementation.
+ * Triggers a Jenkins build for a specified job with branch parameter support.
+ */
 import { confirm, isCancel, select, text } from "@clack/prompts";
 import { CliError, printOk } from "../cli";
 import type { EnvConfig } from "../env";
 import type { JenkinsClient, JenkinsJob } from "../jenkins/client";
 import { getJobDisplayName, loadJobs, resolveJobMatch } from "../jobs";
 
+/** Options for the build command. */
 type BuildOptions = {
   client: JenkinsClient;
   env: EnvConfig;

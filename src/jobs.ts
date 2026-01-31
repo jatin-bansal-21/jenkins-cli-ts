@@ -1,9 +1,15 @@
+/**
+ * Job caching and fuzzy matching.
+ * Caches jobs locally in .jenkins-cli/jobs.json and provides
+ * natural language search with scoring for job lookups.
+ */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CliError } from "./cli";
 import type { EnvConfig } from "./env";
 import type { JenkinsClient, JenkinsJob } from "./jenkins/client";
 
+/** Cached job data with metadata. */
 export type JobCache = {
   jenkinsUrl: string;
   user: string;
@@ -165,21 +171,23 @@ export async function resolveJobMatch(options: {
   }
 
   const ranked = rankJobs(trimmedQuery, options.jobs);
+  const topMatch = ranked[0];
 
-  if (ranked.length === 0 || ranked[0].score < MIN_SCORE) {
+  if (!topMatch || topMatch.score < MIN_SCORE) {
     throw new CliError(`No jobs match "${trimmedQuery}".`, [
       "Try a different description or run `jenkins-cli list --refresh`.",
       "Or pass `--job-url` to skip cache matching.",
     ]);
   }
 
-  const topScore = ranked[0].score;
+  const topScore = topMatch.score;
   const closeMatches = ranked.filter(
     (match) => match.score >= MIN_SCORE && topScore - match.score <= AMBIGUITY_GAP,
   );
 
-  if (closeMatches.length === 1) {
-    return closeMatches[0].job;
+  const firstMatch = closeMatches[0];
+  if (closeMatches.length === 1 && firstMatch) {
+    return firstMatch.job;
   }
 
   const optionsList = closeMatches.slice(0, MAX_OPTIONS).map((match) => match.job);

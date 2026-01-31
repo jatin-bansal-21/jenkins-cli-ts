@@ -1,9 +1,14 @@
+/**
+ * List command implementation.
+ * Displays all cached Jenkins jobs with optional search filtering.
+ */
 import { confirm, isCancel, text } from "@clack/prompts";
 import { CliError, printOk } from "../cli";
 import type { EnvConfig } from "../env";
 import type { JenkinsClient } from "../jenkins/client";
 import { getJobDisplayName, loadJobs, rankJobs } from "../jobs";
 
+/** Options for the list command. */
 type ListOptions = {
   client: JenkinsClient;
   env: EnvConfig;

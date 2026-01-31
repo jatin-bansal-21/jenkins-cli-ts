@@ -1,9 +1,14 @@
+/**
+ * Status command implementation.
+ * Shows the last build status (number, result, URL) for a job.
+ */
 import { confirm, isCancel, select, text } from "@clack/prompts";
 import { CliError, printOk } from "../cli";
 import type { EnvConfig } from "../env";
 import type { JenkinsClient, JenkinsJob } from "../jenkins/client";
 import { getJobDisplayName, loadJobs, resolveJobMatch } from "../jobs";
 
+/** Options for the status command. */
 type StatusOptions = {
   client: JenkinsClient;
   env: EnvConfig;

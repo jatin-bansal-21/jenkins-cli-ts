@@ -1,5 +1,11 @@
+/**
+ * Jenkins REST API client.
+ * Handles authentication, CSRF crumbs, and provides methods for
+ * listing jobs, fetching status, and triggering builds.
+ */
 import { CliError } from "../cli";
 
+/** Jenkins job metadata. */
 export type JenkinsJob = {
   name: string;
   fullName?: string;

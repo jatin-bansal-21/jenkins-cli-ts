@@ -1,3 +1,9 @@
+/**
+ * CLI output utilities and error handling.
+ * Provides standardized output prefixes (OK:, ERROR:, HINT:) for easy parsing.
+ */
+
+/** Structured error with optional hints for user guidance. */
 export class CliError extends Error {
   public readonly hints: string[];
 

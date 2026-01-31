@@ -1,5 +1,10 @@
+/**
+ * Environment configuration loader.
+ * Validates and loads JENKINS_URL, JENKINS_USER, and JENKINS_API_TOKEN.
+ */
 import { CliError } from "./cli";
 
+/** Jenkins connection configuration. */
 export type EnvConfig = {
   jenkinsUrl: string;
   jenkinsUser: string;
