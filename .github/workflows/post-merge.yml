@@ -100,21 +100,3 @@ jobs:
           committer: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
           author: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
           delete-branch: true
-
-      - name: Auto-merge PR
-        if: steps.prepare.outputs.has_changes == 'true'
-        run: |
-          # Wait a moment for PR to be created
-          sleep 5
-          
-          # Find the PR and enable auto-merge
-          PR_NUMBER=$(gh pr list --head "auto/fix-and-version-${{ steps.prepare.outputs.new_version }}" --json number --jq '.[0].number')
-          
-          if [ ! -z "$PR_NUMBER" ]; then
-            echo "Enabling auto-merge for PR #$PR_NUMBER"
-            gh pr merge "$PR_NUMBER" --auto --squash
-          else
-            echo "PR not found, it may take a moment to create"
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
