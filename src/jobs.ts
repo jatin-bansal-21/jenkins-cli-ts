@@ -6,6 +6,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CliError } from "./cli";
+import { MIN_SCORE, AMBIGUITY_GAP, MAX_OPTIONS } from "./config/fuzzy";
 import type { EnvConfig } from "./env";
 import type { JenkinsClient, JenkinsJob } from "./jenkins/client";
 
@@ -20,10 +21,33 @@ export type JobCache = {
 const CACHE_DIR = path.join(process.cwd(), ".jenkins-cli");
 const CACHE_FILE = path.join(CACHE_DIR, "jobs.json");
 
-const TRIVIAL_TOKENS = new Set(["job", "jobs", "build", "trigger"]);
-const MIN_SCORE = 30;
-const AMBIGUITY_GAP = 8;
-const MAX_OPTIONS = 10;
+/** Analyze all jobs to identify frequently-occurring (trivial) tokens.
+ * Tokens appearing in >30% of jobs are considered trivial and weighted lower.
+ */
+function analyzeTokenFrequencies(jobs: JenkinsJob[]): Map<string, number> {
+  const tokenCounts = new Map<string, number>();
+  const totalJobs = jobs.length;
+
+  for (const job of jobs) {
+    const tokens = new Set(
+      job.name
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((t) => t.length > 0),
+    );
+    for (const token of tokens) {
+      tokenCounts.set(token, (tokenCounts.get(token) || 0) + 1);
+    }
+  }
+
+  // Convert counts to frequencies (0-1)
+  const tokenFrequencies = new Map<string, number>();
+  for (const [token, count] of tokenCounts) {
+    tokenFrequencies.set(token, count / totalJobs);
+  }
+
+  return tokenFrequencies;
+}
 
 export function getJobDisplayName(job: JenkinsJob): string {
   return job.fullName || job.name;
@@ -122,7 +146,32 @@ export type RankedJob = {
 
 export function rankJobs(query: string, jobs: JenkinsJob[]): RankedJob[] {
   const normalizedQuery = normalizeText(query);
+
+  // Analyze token frequencies across all jobs to identify trivial/common tokens
+  const tokenFrequencies = analyzeTokenFrequencies(jobs);
+
+  // Tokenize query - keep ALL tokens, we'll weight them differently
   const queryTokens = tokenize(normalizedQuery);
+
+  // First pass: check if any job has an exact or prefix match
+  // This helps us penalize substring matches when a better match exists
+  let hasExactOrPrefixMatch = false;
+  for (const job of jobs) {
+    const candidates = [job.name, job.fullName].filter(
+      (value): value is string => Boolean(value),
+    );
+    for (const candidate of candidates) {
+      const candidateNormalized = normalizeText(candidate);
+      if (
+        candidateNormalized === normalizedQuery ||
+        candidateNormalized.startsWith(normalizedQuery)
+      ) {
+        hasExactOrPrefixMatch = true;
+        break;
+      }
+    }
+    if (hasExactOrPrefixMatch) break;
+  }
 
   const ranked: RankedJob[] = [];
   for (const job of jobs) {
@@ -136,6 +185,8 @@ export function rankJobs(query: string, jobs: JenkinsJob[]): RankedJob[] {
         normalizedQuery,
         queryTokens,
         candidateNormalized,
+        tokenFrequencies,
+        hasExactOrPrefixMatch, // Pass this to apply stricter substring penalties
       );
       if (score > bestScore) {
         bestScore = score;
@@ -150,6 +201,14 @@ export function rankJobs(query: string, jobs: JenkinsJob[]): RankedJob[] {
   ranked.sort((a, b) => {
     if (b.score !== a.score) {
       return b.score - a.score;
+    }
+    // When scores are equal, prefer shorter job names (more specific matches)
+    // This ensures "payment-service-prod" ranks higher than "credit-card-payment-service-prod"
+    // when both have the same substring match score
+    const aLength = getJobDisplayName(a.job).length;
+    const bLength = getJobDisplayName(b.job).length;
+    if (aLength !== bLength) {
+      return aLength - bLength;
     }
     return getJobDisplayName(a.job).localeCompare(getJobDisplayName(b.job));
   });
@@ -182,7 +241,8 @@ export async function resolveJobMatch(options: {
 
   const topScore = topMatch.score;
   const closeMatches = ranked.filter(
-    (match) => match.score >= MIN_SCORE && topScore - match.score <= AMBIGUITY_GAP,
+    (match) =>
+      match.score >= MIN_SCORE && topScore - match.score <= AMBIGUITY_GAP,
   );
 
   const firstMatch = closeMatches[0];
@@ -190,7 +250,9 @@ export async function resolveJobMatch(options: {
     return firstMatch.job;
   }
 
-  const optionsList = closeMatches.slice(0, MAX_OPTIONS).map((match) => match.job);
+  const optionsList = closeMatches
+    .slice(0, MAX_OPTIONS)
+    .map((match) => match.job);
   if (options.nonInteractive || !options.selectFromOptions) {
     const optionNames = optionsList.map(getJobDisplayName).join(", ");
     throw new CliError(`Job name is ambiguous for "${trimmedQuery}".`, [
@@ -202,6 +264,18 @@ export async function resolveJobMatch(options: {
   return options.selectFromOptions(optionsList);
 }
 
+/**
+ * Normalizes text for case-insensitive comparison and fuzzy matching.
+ *
+ * Regex breakdown:
+ * - `/[^a-z0-9]+/g` - Matches one or more non-alphanumeric characters
+ *   (anything that's not a-z or 0-9) and replaces with a single space
+ * - `/\s+/g` - Matches one or more whitespace characters and collapses
+ *   them into a single space
+ *
+ * @param input - The string to normalize
+ * @returns Lowercased string with non-alphanum chars as spaces, collapsed
+ */
 function normalizeText(input: string): string {
   return input
     .toLowerCase()
@@ -217,13 +291,15 @@ function tokenize(input: string): string[] {
   return input
     .split(" ")
     .map((token) => token.trim())
-    .filter((token) => token.length > 0 && !TRIVIAL_TOKENS.has(token));
+    .filter((token) => token.length > 0);
 }
 
 function scoreCandidate(
   normalizedQuery: string,
   queryTokens: string[],
   candidate: string,
+  tokenFrequencies?: Map<string, number>,
+  hasExactOrPrefixMatch?: boolean,
 ): number {
   if (!normalizedQuery || !candidate) {
     return 0;
@@ -238,6 +314,28 @@ function scoreCandidate(
   }
 
   if (candidate.includes(normalizedQuery)) {
+    // For substring matches, penalize if job has significantly more tokens than query
+    // This prevents "payment-service-prod" from matching "credit-card-payment-service-prod"
+    const queryTokenCount = normalizedQuery.split(" ").length;
+    const candidateTokenCount = candidate.split(" ").length;
+
+    if (candidateTokenCount > queryTokenCount) {
+      const extraTokens = candidateTokenCount - queryTokenCount;
+
+      // If there's an exact/prefix match available, be more strict with substring matches
+      // This ensures "payment-service-prod" doesn't match "credit-card-payment-service-prod"
+      // when "payment-service-prod" exists as an exact match
+      if (hasExactOrPrefixMatch) {
+        // Aggressive penalty: -20 points per extra token when better match exists
+        const penalty = extraTokens * 20;
+        return Math.max(0, 60 - penalty);
+      } else {
+        // Lighter penalty when no better match exists: -8 points per extra token
+        // This allows "analytics ml" to match "data-analytics-ml-pipeline-prod"
+        const penalty = extraTokens * 8;
+        return Math.max(25, 60 - penalty);
+      }
+    }
     return 60;
   }
 
@@ -246,11 +344,30 @@ function scoreCandidate(
   }
 
   const candidateTokens = new Set(candidate.split(" "));
-  const overlap = queryTokens.filter((token) => candidateTokens.has(token)).length;
-  if (overlap === 0) {
+
+  // Calculate weighted overlap score
+  // Rare tokens (low frequency) contribute more to the score
+  // Common/trivial tokens (high frequency) contribute less
+  let weightedOverlap = 0;
+  let totalWeight = 0;
+
+  for (const queryToken of queryTokens) {
+    const frequency = tokenFrequencies?.get(queryToken) ?? 0.5;
+    // Weight = inverse of frequency (rare tokens get higher weight)
+    // Add 0.1 to avoid division by zero and ensure all tokens have some weight
+    const weight = 1.1 - frequency;
+    totalWeight += weight;
+
+    if (candidateTokens.has(queryToken)) {
+      weightedOverlap += weight;
+    }
+  }
+
+  if (weightedOverlap === 0) {
     return 0;
   }
 
-  const ratio = overlap / queryTokens.length;
-  return Math.round(ratio * 40);
+  // Score based on weighted ratio (0-40 scale)
+  const weightedRatio = weightedOverlap / totalWeight;
+  return Math.round(weightedRatio * 40);
 }

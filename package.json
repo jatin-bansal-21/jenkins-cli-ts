@@ -12,16 +12,28 @@
     "build": "bun build src/index.ts --outdir dist --target bun",
     "install:global": "bun run build && bun link",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "bun test",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/yargs": "^17.0.35",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "oxlint": "^1.42.0",
+    "prettier": "3.8.1",
     "typescript": "^5"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
     "yargs": "^18.0.0"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx,js,jsx,json,css,md}": [
+      "oxlint --fix",
+      "prettier --write"
+    ]
   }
 }
