@@ -8,7 +8,7 @@ import path from "node:path";
 import { CliError } from "./cli";
 
 const CONFIG_DIR = path.join(os.homedir(), ".config", "jenkins-cli");
-const CONFIG_FILE = path.join(CONFIG_DIR, "jenkins-cli-config");
+const CONFIG_FILE = path.join(CONFIG_DIR, "jenkins-cli-config.json");
 
 type RawEnv = {
   JENKINS_URL?: string;

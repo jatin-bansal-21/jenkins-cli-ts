@@ -11,7 +11,7 @@ Set required environment variables:
 - `JENKINS_USER`
 - `JENKINS_API_TOKEN`
 
-The CLI also reads these values from `~/.config/jenkins-cli/jenkins-cli-config`
+The CLI also reads these values from `~/.config/jenkins-cli/jenkins-cli-config.json`
 (JSON) if the env vars are not set:
 
 ```json
@@ -26,7 +26,7 @@ Environment variables always take precedence.
 
 ## Setup script
 
-Run the helper script to set env vars and optionally persist them:
+Run the helper script to collect credentials, save config, and print export commands:
 
 ```bash
 bash setup.sh
@@ -40,11 +40,10 @@ chmod +x ./setup.sh
 ```
 
 It installs Bun if needed, installs dependencies, installs the CLI globally,
-saves values to `~/.config/jenkins-cli/jenkins-cli-config`, and can optionally
-add environment variable exports to your shell profile. After saving, open a new
-terminal or run `. ~/.zshrc` (or your chosen profile).
+saves values to `~/.config/jenkins-cli/jenkins-cli-config.json`, and prints
+export commands you can run or add to your shell profile manually.
 
-Skip installs and only set env vars:
+Skip installs and only save config / show exports:
 
 ```bash
 bash setup.sh --no-install

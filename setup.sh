@@ -17,7 +17,7 @@ for arg in "$@"; do
     -h|--help)
       print "Usage: bash setup.sh [--no-install]"
       print ""
-      print "  --no-install  Skip Bun/dependency/global install; only set env vars."
+      print "  --no-install  Skip Bun/dependency/global install; only save config."
       exit 0
       ;;
     *)
@@ -171,6 +171,10 @@ escape_json() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+shell_quote() {
+  printf '%q' "$1"
+}
+
 write_config_file() {
   local old_umask
   old_umask=$(umask)
@@ -187,22 +191,8 @@ EOF
   chmod 600 "$config_file" 2>/dev/null || true
 }
 
-default_profile="$HOME/.profile"
-if [ -n "${SHELL:-}" ]; then
-  case "$SHELL" in
-    */zsh) default_profile="$HOME/.zshrc" ;;
-    */bash)
-      if [ -f "$HOME/.bashrc" ]; then
-        default_profile="$HOME/.bashrc"
-      else
-        default_profile="$HOME/.bash_profile"
-      fi
-      ;;
-  esac
-fi
-
 config_dir="$HOME/.config/jenkins-cli"
-config_file="$config_dir/jenkins-cli-config"
+config_file="$config_dir/jenkins-cli-config.json"
 
 env_url="${JENKINS_URL:-}"
 env_user="${JENKINS_USER:-}"
@@ -361,13 +351,11 @@ prompt_with_default "Jenkins username" "$default_user" JENKINS_USER
 prompt_secret_with_default "Jenkins API token" "$default_token" JENKINS_API_TOKEN
 
 saved_config=false
-config_available=$config_exists
 if confirm "Save values to $config_file? [y/N]: "; then
   if [ -f "$config_file" ]; then
     if confirm "Config already exists at $config_file. Overwrite? [y/N]: "; then
       write_config_file
       saved_config=true
-      config_available=true
       print "Saved config to $config_file."
     else
       print "Skipped writing config."
@@ -375,62 +363,22 @@ if confirm "Save values to $config_file? [y/N]: "; then
   else
     write_config_file
     saved_config=true
-    config_available=true
     print "Saved config to $config_file."
   fi
 else
   print "Config not saved."
 fi
 
-if confirm "Also export these as environment variables in your shell profile? [y/N]: "; then
-  profile="$default_profile"
-  printf 'Profile file to update [%s]: ' "$default_profile"
-  IFS= read -r profile_input
-  if [ -n "$profile_input" ]; then
-    profile="$profile_input"
-  fi
-
-  touch "$profile"
-  profile_block=$(cat <<EOF
-# jenkins-cli env
-export JENKINS_URL="$(escape_json "$JENKINS_URL")"
-export JENKINS_USER="$(escape_json "$JENKINS_USER")"
-export JENKINS_API_TOKEN="$(escape_json "$JENKINS_API_TOKEN")"
-# end jenkins-cli env
-EOF
-)
-
-  profile_updated=false
-  if grep -q "^# jenkins-cli env$" "$profile" 2>/dev/null; then
-    if confirm "Profile already has Jenkins CLI env exports. Replace them? [y/N]: "; then
-      tmp_file="$(mktemp)"
-      awk '
-        BEGIN { skip=0 }
-        /^# jenkins-cli env$/ { skip=1; next }
-        /^# end jenkins-cli env$/ { skip=0; next }
-        skip==0 { print }
-      ' "$profile" > "$tmp_file"
-      printf '\n%s\n' "$profile_block" >> "$tmp_file"
-      cat "$tmp_file" > "$profile"
-      rm -f "$tmp_file"
-      profile_updated=true
-    else
-      print "Skipped updating $profile."
-    fi
-  else
-    printf '\n%s\n' "$profile_block" >> "$profile"
-    profile_updated=true
-  fi
-
-  if [ "$profile_updated" = true ]; then
-    print "Updated $profile."
-    print "Open a new terminal or run: . \"$profile\""
-  fi
-else
-  print "Env vars not added to your profile."
-  if [ "$config_available" = true ]; then
-    print "The CLI will read $config_file directly."
-  else
-    print "Re-run this script anytime to store values."
-  fi
+print ""
+print "To set env vars in your current shell, run:"
+quoted_url=$(shell_quote "$JENKINS_URL")
+quoted_user=$(shell_quote "$JENKINS_USER")
+quoted_token=$(shell_quote "$JENKINS_API_TOKEN")
+print "  export JENKINS_URL=$quoted_url"
+print "  export JENKINS_USER=$quoted_user"
+print "  export JENKINS_API_TOKEN=$quoted_token"
+print ""
+print "To persist them, add the exports to your shell profile manually."
+if [ "$saved_config" = true ]; then
+  print "The CLI will also read $config_file directly."
 fi

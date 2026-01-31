@@ -123,10 +123,28 @@ async function main(): Promise<void> {
         });
       },
     )
+    .version("version", `Show version (${VERSION})`, VERSION)
+    .alias("version", "v")
     .demandCommand(1, "Missing command. Use --help to see usage.")
     .strict()
-    .version(VERSION)
     .help()
+    .epilog(`Command-specific options:
+  list:
+    --search   Search jobs by name or description
+    --refresh  Refresh the job cache from Jenkins
+
+  build:
+    --job             Job name or description
+    --job-url         Full Jenkins job URL
+    --branch          Branch name to build
+    --branch-param    Parameter name for the branch [default: "BRANCH"]
+    --default-branch  Use the job's default branch
+
+  status:
+    --job      Job name or description
+    --job-url  Full Jenkins job URL
+
+Run "$0 <command> --help" for full details.`)
     .fail((message, error) => {
       if (error) {
         throw error;
