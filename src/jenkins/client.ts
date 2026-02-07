@@ -236,7 +236,9 @@ export class JenkinsClient {
     params: Record<string, string>,
   ): Promise<TriggerBuildResult> {
     const crumb = await this.getCrumb();
-    const url = this.withJob(jobUrl, "buildWithParameters");
+    const buildUrl = this.withJob(jobUrl, "buildWithParameters");
+    const url = new URL(buildUrl);
+    url.searchParams.set("delay", "0sec");
     const body = new URLSearchParams(params).toString();
 
     const headers: Record<string, string> = {
@@ -248,7 +250,7 @@ export class JenkinsClient {
     }
 
     const response = await this.fetchWithTimeout(
-      url,
+      url.toString(),
       { method: "POST", headers, body },
       1,
       "trigger build",
