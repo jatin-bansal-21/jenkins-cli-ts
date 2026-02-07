@@ -2,18 +2,11 @@
  * List command implementation.
  * Displays all cached Jenkins jobs with optional search filtering.
  */
-import { confirm, isCancel, select, text } from "@clack/prompts";
 import { CliError, printError, printHint, printOk } from "../cli";
-import { runBuild } from "./build";
-import { runCancel } from "./cancel";
-import { runLogs } from "./logs";
-import { runRerun } from "./rerun";
-import { runStatus } from "./status";
-import { runWait } from "./wait";
 import type { EnvConfig } from "../env";
 import type { JenkinsClient, JenkinsJob } from "../jenkins/client";
 import { MIN_SCORE } from "../config/fuzzy";
-import { getJobDisplayName, loadJobs, rankJobs } from "../jobs";
+import { listDeps } from "./list-deps";
 
 /** Options for the list command. */
 type ListOptions = {
@@ -25,17 +18,17 @@ type ListOptions = {
 };
 
 export async function runList(options: ListOptions): Promise<void> {
-  const jobs = await loadJobs({
+  const jobs = await listDeps.loadJobs({
     client: options.client,
     env: options.env,
     refresh: options.refresh,
     nonInteractive: options.nonInteractive,
     confirmRefresh: async (reason) => {
-      const response = await confirm({
+      const response = await listDeps.confirm({
         message: `${reason} Refresh now?`,
         initialValue: true,
       });
-      if (isCancel(response)) {
+      if (listDeps.isCancel(response)) {
         throw new CliError("Operation cancelled.");
       }
       return response;
@@ -51,7 +44,7 @@ export async function runList(options: ListOptions): Promise<void> {
     }
 
     for (const job of jobsToPrint) {
-      console.log(`${getJobDisplayName(job)}  ${job.url}`);
+      console.log(`${listDeps.getJobDisplayName(job)}  ${job.url}`);
     }
   };
 
@@ -96,9 +89,14 @@ function getFilteredJobs(jobs: JenkinsJob[], search: string): JenkinsJob[] {
   if (!search) {
     return jobs
       .slice()
-      .sort((a, b) => getJobDisplayName(a).localeCompare(getJobDisplayName(b)));
+      .sort((a, b) =>
+        listDeps
+          .getJobDisplayName(a)
+          .localeCompare(listDeps.getJobDisplayName(b)),
+      );
   }
-  return rankJobs(search, jobs)
+  return listDeps
+    .rankJobs(search, jobs)
     .filter((match) => match.score >= MIN_SCORE)
     .map((match) => match.job);
 }
@@ -107,11 +105,11 @@ async function promptSearch(initialSearch: string): Promise<string> {
   if (initialSearch) {
     return initialSearch;
   }
-  const response = await text({
+  const response = await listDeps.text({
     message: "Search jobs (optional, q to exit)",
     placeholder: "e.g. api prod",
   });
-  if (isCancel(response)) {
+  if (listDeps.isCancel(response)) {
     throw new CliError("Operation cancelled.");
   }
   return String(response).trim();
@@ -125,18 +123,18 @@ async function runListActionMenu(options: {
   const searchAgainValue = "__jenkins_cli_search_again__";
   const exitValue = "__jenkins_cli_exit__";
 
-  const choice = await select({
+  const choice = await listDeps.select({
     message: "Select a job to operate on",
     options: [
       ...options.jobs.map((job) => ({
         value: job.url,
-        label: getJobDisplayName(job),
+        label: listDeps.getJobDisplayName(job),
       })),
       { value: searchAgainValue, label: "Search again" },
       { value: exitValue, label: "Exit" },
     ],
   });
-  if (isCancel(choice) || choice === exitValue) {
+  if (listDeps.isCancel(choice) || choice === exitValue) {
     return "exit";
   }
   if (choice === searchAgainValue) {
@@ -163,8 +161,8 @@ async function runJobActionMenu(options: {
   job: JenkinsJob;
 }): Promise<"search" | "exit"> {
   while (true) {
-    const action = await select({
-      message: `Action for ${getJobDisplayName(options.job)}`,
+    const action = await listDeps.select({
+      message: `Action for ${listDeps.getJobDisplayName(options.job)}`,
       options: [
         { value: "build", label: "Build" },
         { value: "status", label: "Status" },
@@ -176,7 +174,7 @@ async function runJobActionMenu(options: {
         { value: "exit", label: "Exit" },
       ],
     });
-    if (isCancel(action) || action === "exit") {
+    if (listDeps.isCancel(action) || action === "exit") {
       return "exit";
     }
     if (action === "search") {
@@ -185,7 +183,7 @@ async function runJobActionMenu(options: {
 
     if (action === "build") {
       await runMenuAction(async () =>
-        runBuild({
+        listDeps.runBuild({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,
@@ -198,7 +196,7 @@ async function runJobActionMenu(options: {
     }
     if (action === "status") {
       await runMenuAction(async () =>
-        runStatus({
+        listDeps.runStatus({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,
@@ -209,7 +207,7 @@ async function runJobActionMenu(options: {
     }
     if (action === "watch") {
       await runMenuAction(async () =>
-        runWait({
+        listDeps.runWait({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,
@@ -221,7 +219,7 @@ async function runJobActionMenu(options: {
     }
     if (action === "logs") {
       await runMenuAction(async () =>
-        runLogs({
+        listDeps.runLogs({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,
@@ -233,7 +231,7 @@ async function runJobActionMenu(options: {
     }
     if (action === "cancel") {
       await runMenuAction(async () =>
-        runCancel({
+        listDeps.runCancel({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,
@@ -244,7 +242,7 @@ async function runJobActionMenu(options: {
     }
     if (action === "rerun") {
       await runMenuAction(async () =>
-        runRerun({
+        listDeps.runRerun({
           client: options.client,
           env: options.env,
           jobUrl: options.job.url,

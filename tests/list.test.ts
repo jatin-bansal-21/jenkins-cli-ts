@@ -25,46 +25,30 @@ const textMock = mock(async () => "q");
 const runBuildMock = mock(async () => undefined);
 const runStatusMock = mock(async () => undefined);
 const runWaitMock = mock(async () => undefined);
-const waitForBuildMock = mock(async () => undefined);
 const runLogsMock = mock(async () => undefined);
 const runCancelMock = mock(async () => undefined);
 const runRerunMock = mock(async () => undefined);
 
-mock.module("../src/jobs", () => ({
-  loadJobs: loadJobsMock,
-  getJobDisplayName: (job: { name: string; fullName?: string }) =>
-    job.fullName || job.name,
-  rankJobs: (query: string, entries: { name: string; url: string }[]) =>
-    entries
-      .filter((job) => job.name.includes(query))
-      .map((job) => ({ job, score: 100 })),
-}));
-
-mock.module("@clack/prompts", () => ({
-  confirm: confirmMock,
-  isCancel: isCancelMock,
-  select: selectMock,
-  text: textMock,
-}));
-
-mock.module("../src/commands/build", () => ({
-  runBuild: runBuildMock,
-}));
-mock.module("../src/commands/status", () => ({
-  runStatus: runStatusMock,
-}));
-mock.module("../src/commands/wait", () => ({
-  runWait: runWaitMock,
-  waitForBuild: waitForBuildMock,
-}));
-mock.module("../src/commands/logs", () => ({
-  runLogs: runLogsMock,
-}));
-mock.module("../src/commands/cancel", () => ({
-  runCancel: runCancelMock,
-}));
-mock.module("../src/commands/rerun", () => ({
-  runRerun: runRerunMock,
+mock.module("../src/commands/list-deps", () => ({
+  listDeps: {
+    confirm: confirmMock,
+    isCancel: isCancelMock,
+    select: selectMock,
+    text: textMock,
+    loadJobs: loadJobsMock,
+    getJobDisplayName: (job: { name: string; fullName?: string }) =>
+      job.fullName || job.name,
+    rankJobs: (query: string, entries: { name: string; url: string }[]) =>
+      entries
+        .filter((job) => job.name.includes(query))
+        .map((job) => ({ job, score: 100 })),
+    runBuild: runBuildMock,
+    runStatus: runStatusMock,
+    runWait: runWaitMock,
+    runLogs: runLogsMock,
+    runCancel: runCancelMock,
+    runRerun: runRerunMock,
+  },
 }));
 
 const { runList } = await import("../src/commands/list");
@@ -89,8 +73,6 @@ describe("runList", () => {
     runStatusMock.mockImplementation(async () => undefined);
     runWaitMock.mockReset();
     runWaitMock.mockImplementation(async () => undefined);
-    waitForBuildMock.mockReset();
-    waitForBuildMock.mockImplementation(async () => undefined);
     runLogsMock.mockReset();
     runLogsMock.mockImplementation(async () => undefined);
     runCancelMock.mockReset();
