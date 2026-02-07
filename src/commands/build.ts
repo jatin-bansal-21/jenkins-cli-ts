@@ -164,6 +164,14 @@ export async function runBuild(options: BuildOptions): Promise<void> {
       watch: watchFixed,
       nonInteractive: false,
     });
+    printNonInteractiveBuildTip({
+      scriptName: getScriptName(),
+      jobUrl: resolvedJobUrl,
+      branch: resolvedBranch,
+      defaultBranch,
+      branchParam,
+      watch: shouldWatch,
+    });
     let activeBuild = {
       buildUrl: result.buildUrl,
       buildNumber: result.buildNumber,
@@ -209,17 +217,6 @@ export async function runBuild(options: BuildOptions): Promise<void> {
     if (options.returnToCaller) {
       return;
     }
-
-    const rerunCommand = formatNonInteractiveBuildCommand({
-      scriptName: getScriptName(),
-      jobUrl: resolvedJobUrl,
-      branch: resolvedBranch,
-      defaultBranch,
-      branchParam,
-      watch: shouldWatch,
-    });
-    printOk("TIP: Non-interactive equivalent:");
-    console.log(rerunCommand);
 
     const runAgain = await confirm({
       message: "Trigger another build?",
@@ -321,14 +318,15 @@ async function runPostBuildActionMenu(options: {
     }
 
     if (action === "cancel") {
+      const cancelTarget = resolveCancelTarget(activeBuild);
       await runMenuAction(async () =>
         runCancel({
           client: options.client,
           env: options.env,
-          buildUrl: activeBuild.buildUrl,
-          queueUrl: activeBuild.queueUrl,
+          buildUrl: cancelTarget.buildUrl,
+          queueUrl: cancelTarget.queueUrl,
           jobUrl:
-            !activeBuild.buildUrl && !activeBuild.queueUrl
+            !cancelTarget.buildUrl && !cancelTarget.queueUrl
               ? options.jobUrl
               : undefined,
           nonInteractive: false,
@@ -376,6 +374,13 @@ async function runPostBuildActionMenu(options: {
       } else {
         printOk(`Build triggered for ${options.jobLabel}.`);
       }
+      printNonInteractiveBuildTip({
+        scriptName: getScriptName(),
+        jobUrl: options.jobUrl,
+        branch: branchValue,
+        defaultBranch: !branchValue,
+        branchParam: options.branchParam,
+      });
       continue;
     }
   }
@@ -525,6 +530,34 @@ function validateBuildOptions(options: BuildOptions): void {
       "Pass --branch <name> or use --default-branch to use the job default.",
     ]);
   }
+}
+
+function resolveCancelTarget(activeBuild: {
+  buildUrl?: string;
+  queueUrl?: string;
+}): { buildUrl?: string; queueUrl?: string } {
+  const buildUrl = activeBuild.buildUrl?.trim() ?? "";
+  if (buildUrl) {
+    return { buildUrl };
+  }
+  const queueUrl = activeBuild.queueUrl?.trim() ?? "";
+  if (queueUrl) {
+    return { queueUrl };
+  }
+  return {};
+}
+
+function printNonInteractiveBuildTip(options: {
+  scriptName: string;
+  jobUrl: string;
+  branch?: string;
+  defaultBranch: boolean;
+  branchParam: string;
+  watch?: boolean;
+}): void {
+  const rerunCommand = formatNonInteractiveBuildCommand(options);
+  printOk("TIP: Non-interactive equivalent:");
+  console.log(rerunCommand);
 }
 
 function formatNonInteractiveBuildCommand(options: {
