@@ -36,6 +36,10 @@ import {
   type StatusDetails,
 } from "../status-format";
 import { waitForPollIntervalOrCancel } from "./watch-utils";
+import { runFlow } from "../flows/runner";
+import { flowDefinitions } from "../flows/definition";
+import { buildFlowHandlers } from "../flows/handlers";
+import type { ActionEffectResult, BuildPostContext } from "../flows/types";
 
 /** Options for the build command. */
 type BuildOptions = {
@@ -59,7 +63,11 @@ type ActiveBuild = {
   queueUrl: string | undefined;
 };
 
-export async function runBuild(options: BuildOptions): Promise<void> {
+export type BuildRunResult = {
+  rootRequested?: boolean;
+};
+
+export async function runBuild(options: BuildOptions): Promise<BuildRunResult> {
   validateBuildOptions(options);
   const branchParam = normalizeBranchParam(options.branchParam);
 
@@ -74,7 +82,7 @@ export async function runBuild(options: BuildOptions): Promise<void> {
       branchParam,
       watch: options.watch,
     });
-    return;
+    return {};
   }
 
   let job = options.job;
@@ -197,176 +205,156 @@ export async function runBuild(options: BuildOptions): Promise<void> {
       }
     }
 
-    await runPostBuildActionMenu({
-      client: options.client,
-      env: options.env,
-      jobUrl: resolvedJobUrl,
+    const flowContext: BuildPostContext = {
       jobLabel: displayJob,
-      branchParam,
-      params,
-      activeBuild,
-    });
-
-    if (options.returnToCaller) {
-      return;
-    }
-
-    const runAgain = await confirm({
-      message: "Trigger another build?",
-      initialValue: false,
-    });
-    if (isCancel(runAgain)) {
-      throw new CliError("Operation cancelled.");
-    }
-    if (!runAgain) {
-      return;
-    }
-
-    job = undefined;
-    jobUrl = undefined;
-    branch = undefined;
-    defaultBranch = false;
-  }
-}
-
-async function runPostBuildActionMenu(options: {
-  client: JenkinsClient;
-  env: EnvConfig;
-  jobUrl: string;
-  jobLabel: string;
-  branchParam: string;
-  params: Record<string, string>;
-  activeBuild: ActiveBuild;
-}): Promise<ActiveBuild> {
-  let activeBuild = options.activeBuild;
-
-  while (true) {
-    const action = await select({
-      message: `Next action for ${options.jobLabel}`,
-      options: [
-        { value: "watch", label: "Watch" },
-        { value: "logs", label: "Logs" },
-        { value: "cancel", label: "Cancel" },
-        { value: "rerun", label: "Rerun same inputs" },
-        { value: "done", label: "Done" },
-      ],
-    });
-    if (isCancel(action) || action === "done") {
-      return activeBuild;
-    }
-
-    if (action === "watch") {
-      const finalStatus = await runMenuAction(async () =>
-        watchBuildStatus({
-          client: options.client,
-          jobUrl: options.jobUrl,
-          jobLabel: options.jobLabel,
-          buildUrl: activeBuild.buildUrl,
-          buildNumber: activeBuild.buildNumber,
-          queueUrl: activeBuild.queueUrl,
-        }),
-      );
-      if (!finalStatus) {
-        continue;
-      }
-      if (!finalStatus.cancelled) {
-        await notifyBuildComplete({
-          message: formatNotificationMessage({
-            jobLabel: options.jobLabel,
-            buildNumber: finalStatus.buildNumber,
-            result: finalStatus.result,
-          }),
-        });
-        if (finalStatus.result !== "SUCCESS") {
-          process.exitCode = 1;
-        }
-      }
-      continue;
-    }
-
-    if (action === "logs") {
-      await runMenuAction(async () =>
-        runLogs({
-          client: options.client,
-          env: options.env,
-          buildUrl: activeBuild.buildUrl,
-          queueUrl: activeBuild.queueUrl,
-          jobUrl:
-            !activeBuild.buildUrl && !activeBuild.queueUrl
-              ? options.jobUrl
-              : undefined,
-          follow: true,
-          nonInteractive: false,
-        }),
-      );
-      continue;
-    }
-
-    if (action === "cancel") {
-      const cancelTarget = resolveCancelTarget(activeBuild);
-      await runMenuAction(async () =>
-        runCancel({
-          client: options.client,
-          env: options.env,
-          buildUrl: cancelTarget.buildUrl,
-          queueUrl: cancelTarget.queueUrl,
-          jobUrl:
-            !cancelTarget.buildUrl && !cancelTarget.queueUrl
-              ? options.jobUrl
-              : undefined,
-          nonInteractive: false,
-        }),
-      );
-      continue;
-    }
-
-    if (action === "rerun") {
-      const rerunResult = await options.client.triggerBuild(
-        options.jobUrl,
-        options.params,
-      );
-      activeBuild = {
-        buildUrl: rerunResult.buildUrl,
-        buildNumber: rerunResult.buildNumber,
-        queueUrl: rerunResult.queueUrl,
-      };
-
-      const branchValue = options.params[options.branchParam];
-      if (branchValue) {
-        try {
-          await recordBranchSelection({
-            env: options.env,
-            jobUrl: options.jobUrl,
-            branch: branchValue,
+      returnToCaller: Boolean(options.returnToCaller),
+      performAction: async (action): Promise<ActionEffectResult> => {
+        if (action === "watch") {
+          const finalStatus = await runMenuAction(async () =>
+            watchBuildStatus({
+              client: options.client,
+              jobUrl: resolvedJobUrl,
+              jobLabel: displayJob,
+              buildUrl: activeBuild.buildUrl,
+              buildNumber: activeBuild.buildNumber,
+              queueUrl: activeBuild.queueUrl,
+            }),
+          );
+          if (!finalStatus) {
+            return "action_error";
+          }
+          if (finalStatus.cancelled) {
+            return "watch_cancelled";
+          }
+          await notifyBuildComplete({
+            message: formatNotificationMessage({
+              jobLabel: displayJob,
+              buildNumber: finalStatus.buildNumber,
+              result: finalStatus.result,
+            }),
           });
-        } catch {
-          // Ignore cache write failures for build success.
+          if (finalStatus.result !== "SUCCESS") {
+            process.exitCode = 1;
+          }
+          return "action_ok";
         }
-      }
-      try {
-        await recordRecentJob({
-          env: options.env,
-          jobUrl: options.jobUrl,
-        });
-      } catch {
-        // Ignore cache write failures for build success.
-      }
 
-      if (rerunResult.buildUrl) {
-        printOk(`Build started at ${rerunResult.buildUrl}.`);
-      } else if (rerunResult.queueUrl) {
-        printOk(`Build queued for ${options.jobLabel}.`);
-      } else {
-        printOk(`Build triggered for ${options.jobLabel}.`);
-      }
-      printNonInteractiveBuildTip({
-        scriptName: getScriptName(),
-        jobUrl: options.jobUrl,
-        branch: branchValue,
-        defaultBranch: !branchValue,
-        branchParam: options.branchParam,
-      });
+        if (action === "logs") {
+          const result = await runMenuAction(async () => {
+            await runLogs({
+              client: options.client,
+              env: options.env,
+              buildUrl: activeBuild.buildUrl,
+              queueUrl: activeBuild.queueUrl,
+              jobUrl:
+                !activeBuild.buildUrl && !activeBuild.queueUrl
+                  ? resolvedJobUrl
+                  : undefined,
+              follow: true,
+              nonInteractive: false,
+            });
+            return "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+
+        if (action === "cancel") {
+          const result = await runMenuAction(async () => {
+            const cancelTarget = resolveCancelTarget(activeBuild);
+            await runCancel({
+              client: options.client,
+              env: options.env,
+              buildUrl: cancelTarget.buildUrl,
+              queueUrl: cancelTarget.queueUrl,
+              jobUrl:
+                !cancelTarget.buildUrl && !cancelTarget.queueUrl
+                  ? resolvedJobUrl
+                  : undefined,
+              nonInteractive: false,
+            });
+            return "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+
+        if (action === "rerun") {
+          const rerunResult = await options.client.triggerBuild(
+            resolvedJobUrl,
+            params,
+          );
+          activeBuild = {
+            buildUrl: rerunResult.buildUrl,
+            buildNumber: rerunResult.buildNumber,
+            queueUrl: rerunResult.queueUrl,
+          };
+
+          const branchValue = params[branchParam];
+          if (branchValue) {
+            try {
+              await recordBranchSelection({
+                env: options.env,
+                jobUrl: resolvedJobUrl,
+                branch: branchValue,
+              });
+            } catch {
+              // Ignore cache write failures for build success.
+            }
+          }
+          try {
+            await recordRecentJob({
+              env: options.env,
+              jobUrl: resolvedJobUrl,
+            });
+          } catch {
+            // Ignore cache write failures for build success.
+          }
+
+          if (rerunResult.buildUrl) {
+            printOk(`Build started at ${rerunResult.buildUrl}.`);
+          } else if (rerunResult.queueUrl) {
+            printOk(`Build queued for ${displayJob}.`);
+          } else {
+            printOk(`Build triggered for ${displayJob}.`);
+          }
+          printNonInteractiveBuildTip({
+            scriptName: getScriptName(),
+            jobUrl: resolvedJobUrl,
+            branch: branchValue,
+            defaultBranch: !branchValue,
+            branchParam,
+          });
+          return "action_ok";
+        }
+
+        return "action_error";
+      },
+    };
+
+    const postBuildResult = await runFlow({
+      definition: flowDefinitions.build_post,
+      handlers: buildFlowHandlers,
+      prompts: { confirm, isCancel, select, text },
+      context: flowContext,
+    });
+
+    if (postBuildResult.terminal === "repeat") {
+      job = undefined;
+      jobUrl = undefined;
+      branch = undefined;
+      defaultBranch = false;
+      continue;
     }
+    if (postBuildResult.terminal === "return_to_caller_root") {
+      return { rootRequested: true };
+    }
+    if (postBuildResult.terminal === "return_to_caller") {
+      return { rootRequested: false };
+    }
+    if (postBuildResult.terminal === "exit_command") {
+      return {};
+    }
+
+    return {};
   }
 }
 

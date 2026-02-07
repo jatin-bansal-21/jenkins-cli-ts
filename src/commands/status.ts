@@ -24,6 +24,10 @@ import {
   resolveJobMatch,
 } from "../jobs";
 import { loadRecentJobs, recordRecentJob } from "../recent-jobs";
+import { runFlow } from "../flows/runner";
+import { flowDefinitions } from "../flows/definition";
+import { statusFlowHandlers } from "../flows/handlers";
+import type { ActionEffectResult, StatusPostContext } from "../flows/types";
 
 /** Options for the status command. */
 type StatusOptions = {
@@ -168,30 +172,99 @@ export async function runStatus(options: StatusOptions): Promise<void> {
       }
     }
 
-    if (targets.length === 1) {
-      const target = targets[0];
-      if (target) {
-        await runStatusActionMenu({
-          client: options.client,
-          env: options.env,
-          target,
-        });
-      }
-    }
+    const primaryTarget = targets.length === 1 ? targets[0] : undefined;
+    const postContext: StatusPostContext = {
+      targetLabel: primaryTarget?.jobLabel || "selected jobs",
+      performAction: async (action): Promise<ActionEffectResult> => {
+        if (!primaryTarget) {
+          return "action_error";
+        }
+        if (action === "watch") {
+          const result = await runMenuAction(async () =>
+            runWait({
+              client: options.client,
+              env: options.env,
+              jobUrl: primaryTarget.jobUrl,
+              nonInteractive: false,
+              suppressExitCode: true,
+            }),
+          );
+          if (!result) {
+            return "action_error";
+          }
+          return result.cancelled ? "watch_cancelled" : "action_ok";
+        }
+        if (action === "logs") {
+          const result = await runMenuAction(async () => {
+            await runLogs({
+              client: options.client,
+              env: options.env,
+              jobUrl: primaryTarget.jobUrl,
+              follow: true,
+              nonInteractive: false,
+            });
+            return "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+        if (action === "cancel") {
+          const result = await runMenuAction(async () => {
+            await runCancel({
+              client: options.client,
+              env: options.env,
+              jobUrl: primaryTarget.jobUrl,
+              nonInteractive: false,
+            });
+            return "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+        if (action === "rerun") {
+          const result = await runMenuAction(async () => {
+            await runRerun({
+              client: options.client,
+              env: options.env,
+              jobUrl: primaryTarget.jobUrl,
+              nonInteractive: false,
+            });
+            return "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+        if (action === "build") {
+          const result = await runMenuAction(async () => {
+            const buildResult = await runBuild({
+              client: options.client,
+              env: options.env,
+              jobUrl: primaryTarget.jobUrl,
+              branchParam: options.env.branchParamDefault,
+              defaultBranch: false,
+              nonInteractive: false,
+              returnToCaller: true,
+            });
+            return buildResult.rootRequested ? "root" : "action_ok";
+          });
+          return (result ?? "action_error") as ActionEffectResult;
+        }
+        return "action_error";
+      },
+    };
 
-    const runAgain = await confirm({
-      message: "Check another job?",
-      initialValue: false,
+    const postResult = await runFlow({
+      definition: flowDefinitions.status_post,
+      handlers: statusFlowHandlers,
+      prompts: { confirm, isCancel, select, text },
+      context: postContext,
+      ...(primaryTarget ? {} : { startStateId: "again_confirm" }),
     });
-    if (isCancel(runAgain)) {
-      throw new CliError("Operation cancelled.");
-    }
-    if (!runAgain) {
-      return;
+
+    if (postResult.terminal === "repeat") {
+      jobUrl = "";
+      jobQuery = "";
+      continue;
     }
 
-    jobUrl = "";
-    jobQuery = "";
+    return;
   }
 }
 
@@ -491,99 +564,18 @@ function shouldRetryJobSearch(error: CliError): boolean {
   return error.message.startsWith("No jobs match ");
 }
 
-async function runStatusActionMenu(options: {
-  client: JenkinsClient;
-  env: EnvConfig;
-  target: { jobUrl: string; jobLabel: string };
-}): Promise<void> {
-  while (true) {
-    const action = await select({
-      message: `Action for ${options.target.jobLabel}`,
-      options: [
-        { value: "watch", label: "Watch" },
-        { value: "logs", label: "Logs" },
-        { value: "cancel", label: "Cancel running/queued build" },
-        { value: "rerun", label: "Rerun last failed build" },
-        { value: "build", label: "Build now" },
-        { value: "done", label: "Done" },
-      ],
-    });
-    if (isCancel(action) || action === "done") {
-      return;
-    }
-
-    if (action === "watch") {
-      await runMenuAction(async () =>
-        runWait({
-          client: options.client,
-          env: options.env,
-          jobUrl: options.target.jobUrl,
-          nonInteractive: false,
-          suppressExitCode: true,
-        }),
-      );
-      continue;
-    }
-    if (action === "logs") {
-      await runMenuAction(async () =>
-        runLogs({
-          client: options.client,
-          env: options.env,
-          jobUrl: options.target.jobUrl,
-          follow: true,
-          nonInteractive: false,
-        }),
-      );
-      continue;
-    }
-    if (action === "cancel") {
-      await runMenuAction(async () =>
-        runCancel({
-          client: options.client,
-          env: options.env,
-          jobUrl: options.target.jobUrl,
-          nonInteractive: false,
-        }),
-      );
-      continue;
-    }
-    if (action === "rerun") {
-      await runMenuAction(async () =>
-        runRerun({
-          client: options.client,
-          env: options.env,
-          jobUrl: options.target.jobUrl,
-          nonInteractive: false,
-        }),
-      );
-      continue;
-    }
-    if (action === "build") {
-      await runMenuAction(async () =>
-        runBuild({
-          client: options.client,
-          env: options.env,
-          jobUrl: options.target.jobUrl,
-          branchParam: options.env.branchParamDefault,
-          defaultBranch: false,
-          nonInteractive: false,
-          returnToCaller: true,
-        }),
-      );
-    }
-  }
-}
-
-async function runMenuAction<T>(action: () => Promise<T>): Promise<void> {
+async function runMenuAction<T>(
+  action: () => Promise<T>,
+): Promise<T | undefined> {
   try {
-    await action();
+    return await action();
   } catch (error) {
     if (error instanceof CliError) {
       printError(error.message);
       for (const hint of error.hints) {
         printHint(hint);
       }
-      return;
+      return undefined;
     }
     throw error;
   }
