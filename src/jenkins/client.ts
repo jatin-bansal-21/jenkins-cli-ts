@@ -105,16 +105,21 @@ export class JenkinsClient {
     const buildUrl = lastBuild.url;
     const buildDetails = buildUrl ? await this.getBuildDetails(buildUrl) : null;
     const pipeline = buildUrl ? await this.getPipelineInfo(buildUrl) : null;
-    const queueTimeMs =
+    let queueTimeMs: number | undefined;
+    if (
       typeof pipeline?.queueDurationMs === "number" &&
       pipeline.queueDurationMs >= 0
-        ? pipeline.queueDurationMs
-        : buildDetails?.queueId && lastBuild.timestamp
-          ? await this.getQueueWaitTimeMs(
-              buildDetails.queueId,
-              lastBuild.timestamp,
-            )
-          : undefined;
+    ) {
+      queueTimeMs = pipeline.queueDurationMs;
+    } else if (
+      typeof buildDetails?.queueId === "number" &&
+      typeof lastBuild.timestamp === "number"
+    ) {
+      queueTimeMs = await this.getQueueWaitTimeMs(
+        buildDetails.queueId,
+        lastBuild.timestamp,
+      );
+    }
     const parameters = extractBuildParameters(buildDetails?.actions);
     const branch = extractBranchParam(parameters);
 
@@ -144,17 +149,21 @@ export class JenkinsClient {
     );
 
     const pipeline = await this.getPipelineInfo(buildUrl);
-    const queueTimeMs =
+    let queueTimeMs: number | undefined;
+    if (
       typeof pipeline?.queueDurationMs === "number" &&
       pipeline.queueDurationMs >= 0
-        ? pipeline.queueDurationMs
-        : typeof buildDetails.queueId === "number" &&
-            typeof buildDetails.timestamp === "number"
-          ? await this.getQueueWaitTimeMs(
-              buildDetails.queueId,
-              buildDetails.timestamp,
-            )
-          : undefined;
+    ) {
+      queueTimeMs = pipeline.queueDurationMs;
+    } else if (
+      typeof buildDetails.queueId === "number" &&
+      typeof buildDetails.timestamp === "number"
+    ) {
+      queueTimeMs = await this.getQueueWaitTimeMs(
+        buildDetails.queueId,
+        buildDetails.timestamp,
+      );
+    }
     const parameters = extractBuildParameters(buildDetails.actions);
     const branch = extractBranchParam(parameters);
 
@@ -259,7 +268,9 @@ export class JenkinsClient {
 
     const text = await response.text();
     const textSizeHeader = response.headers.get("x-text-size");
-    const parsedNextStart = textSizeHeader ? Number(textSizeHeader) : NaN;
+    const parsedNextStart = textSizeHeader
+      ? Number(textSizeHeader)
+      : Number.NaN;
     const nextStart = Number.isFinite(parsedNextStart)
       ? parsedNextStart
       : normalizedStart + text.length;
@@ -500,7 +511,7 @@ export class JenkinsClient {
   }
 
   private serializeRequestBody(
-    body: BodyInit | null | undefined,
+    body: Bun.BodyInit | null | undefined,
   ): string | null {
     if (body === null || body === undefined) {
       return null;
@@ -514,20 +525,20 @@ export class JenkinsClient {
     if (body instanceof FormData) {
       const entries: string[] = [];
       for (const [key, value] of body.entries()) {
-        entries.push(`${key}=${typeof value === "string" ? value : "<file>"}`);
+        entries.push(`${key}=${serializeUnknownValue(value)}`);
       }
       return entries.join("&");
     }
     if (body instanceof Blob) {
-      return `<blob size=${body.size} type=${body.type || "unknown"}>`;
+      return `[blob size=${body.size} type=${body.type || "unknown"}]`;
     }
     if (body instanceof ArrayBuffer) {
-      return `<arraybuffer byteLength=${body.byteLength}>`;
+      return `[arraybuffer byteLength=${body.byteLength}]`;
     }
     if (ArrayBuffer.isView(body)) {
-      return `<binary byteLength=${body.byteLength}>`;
+      return `[binary byteLength=${body.byteLength}]`;
     }
-    return `<body type=${typeof body}>`;
+    return `[body kind=${typeof body}]`;
   }
 
   private async readResponseBody(response: Response): Promise<string | null> {
@@ -535,7 +546,7 @@ export class JenkinsClient {
       return await response.clone().text();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return `<unreadable body: ${message}>`;
+      return `[unreadable body: ${message}]`;
     }
   }
 
@@ -681,7 +692,7 @@ export class JenkinsClient {
           stage.status === "IN_PROGRESS" ||
           stage.status === "PAUSED_PENDING_INPUT",
       );
-      const stage = activeStage ?? stages[stages.length - 1];
+      const stage = activeStage ?? stages.at(-1);
       return {
         stage,
         queueDurationMs: data.queueDurationMillis,
@@ -707,10 +718,7 @@ function extractBuildParameters(
       if (!param || typeof param.name !== "string") {
         continue;
       }
-      const value =
-        param.value === null || param.value === undefined
-          ? ""
-          : String(param.value);
+      const value = serializeUnknownValue(param.value);
       params.push({ name: param.name, value });
     }
   }
@@ -720,7 +728,8 @@ function extractBuildParameters(
 function extractBranchParam(
   params: JenkinsBuildParameter[] | undefined,
 ): string | undefined {
-  if (!params || params.length === 0) {
+  const normalizedParams = params ?? [];
+  if (normalizedParams.length === 0) {
     return undefined;
   }
   const candidates = [
@@ -732,15 +741,41 @@ function extractBranchParam(
     "TAG",
   ];
   for (const key of candidates) {
-    const match = params.find((param) => param.name === key && param.value);
+    const match = normalizedParams.find(
+      (param) => param.name === key && param.value,
+    );
     if (match) {
       return match.value;
     }
   }
-  const fallback = params.find(
+  const fallback = normalizedParams.find(
     (param) => param.name.toLowerCase().includes("branch") && param.value,
   );
   return fallback?.value;
+}
+
+function serializeUnknownValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "[unserializable object]";
+    }
+  }
+  return String(value);
 }
 
 function normalizeJob(job: JenkinsApiJob): JenkinsJob | null {
