@@ -11,6 +11,9 @@ describe("flow definitions", () => {
       validateFlowDefinition(flowDefinitions.build_post),
     ).not.toThrow();
     expect(() =>
+      validateFlowDefinition(flowDefinitions.build_pre),
+    ).not.toThrow();
+    expect(() =>
       validateFlowDefinition(flowDefinitions.status_post),
     ).not.toThrow();
   });

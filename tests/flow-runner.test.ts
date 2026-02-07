@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { flowDefinitions } from "../src/flows/definition";
-import { buildFlowHandlers, listFlowHandlers } from "../src/flows/handlers";
+import {
+  buildFlowHandlers,
+  buildPreFlowHandlers,
+  listFlowHandlers,
+} from "../src/flows/handlers";
 import { runFlow } from "../src/flows/runner";
 import type {
+  BuildPreContext,
   BuildPostContext,
   ListInteractiveContext,
 } from "../src/flows/types";
+import type { EnvConfig } from "../src/env";
 
 const CANCEL = Symbol("cancel");
 
@@ -108,5 +114,33 @@ describe("flow runner", () => {
     });
 
     expect(result.terminal).toBe("repeat");
+  });
+
+  test("build pre flow esc in search from recent returns to recent menu", async () => {
+    const context: BuildPreContext = {
+      env: {} as EnvConfig,
+      jobs: [{ name: "api", url: "https://jenkins.example.com/job/api/" }],
+      recentJobs: [
+        { url: "https://jenkins.example.com/job/api/", label: "api" },
+      ],
+      searchQuery: "",
+      searchCandidates: [],
+      defaultBranch: false,
+      branchChoices: [],
+      removableBranches: [],
+    };
+
+    const result = await runFlow({
+      definition: flowDefinitions.build_pre,
+      handlers: buildPreFlowHandlers,
+      prompts: createPromptAdapter([
+        "__jenkins_cli_search_all__",
+        CANCEL,
+        CANCEL,
+      ]),
+      context,
+    });
+
+    expect(result.terminal).toBe("exit_command");
   });
 });

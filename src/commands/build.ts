@@ -19,13 +19,8 @@ import {
 import { loadRecentJobs, recordRecentJob } from "../recent-jobs.ts";
 import type { EnvConfig } from "../env";
 import type { JenkinsClient } from "../jenkins/client";
-import type { BuildStatus, JenkinsJob, JobStatus } from "../types/jenkins";
-import {
-  getJobDisplayName,
-  loadJobs,
-  resolveJobCandidates,
-  resolveJobMatch,
-} from "../jobs";
+import type { BuildStatus, JobStatus } from "../types/jenkins";
+import { getJobDisplayName, loadJobs, resolveJobMatch } from "../jobs";
 import { notifyBuildComplete } from "../notify";
 import { runCancel } from "./cancel";
 import { runLogs } from "./logs";
@@ -38,8 +33,12 @@ import {
 import { waitForPollIntervalOrCancel } from "./watch-utils";
 import { runFlow } from "../flows/runner";
 import { flowDefinitions } from "../flows/definition";
-import { buildFlowHandlers } from "../flows/handlers";
-import type { ActionEffectResult, BuildPostContext } from "../flows/types";
+import { buildFlowHandlers, buildPreFlowHandlers } from "../flows/handlers";
+import type {
+  ActionEffectResult,
+  BuildPostContext,
+  BuildPreContext,
+} from "../flows/types";
 
 /** Options for the build command. */
 type BuildOptions = {
@@ -54,8 +53,6 @@ type BuildOptions = {
   watch?: boolean;
   returnToCaller?: boolean;
 };
-
-type JobSelectionResult = { kind: "job"; job: JenkinsJob } | { kind: "search" };
 
 type ActiveBuild = {
   buildUrl: string | undefined;
@@ -92,30 +89,25 @@ export async function runBuild(options: BuildOptions): Promise<BuildRunResult> {
   const watchFixed = options.watch;
 
   while (true) {
-    const {
-      jobUrl: resolvedJobUrl,
-      jobLabel,
-      matchedFromSearch,
-    } = await resolveJobTarget({
+    const preBuildSelection = await resolveInteractiveBuildSelection({
       client: options.client,
       env: options.env,
       job,
       jobUrl,
-      nonInteractive: false,
+      branch,
+      defaultBranch,
     });
+    const resolvedJobUrl = preBuildSelection.jobUrl;
+    const jobLabel = preBuildSelection.jobLabel;
+    const matchedFromSearch = preBuildSelection.matchedFromSearch;
+    const resolvedBranch = preBuildSelection.branch;
+    const useDefaultBranch = preBuildSelection.defaultBranch;
 
     if (matchedFromSearch) {
       printOk(`Selected job: ${jobLabel || resolvedJobUrl}.`);
     }
 
-    const resolvedBranch = await resolveBranchValue({
-      env: options.env,
-      jobUrl: resolvedJobUrl,
-      branch,
-      defaultBranch,
-    });
-
-    if (!defaultBranch && !resolvedBranch) {
+    if (!useDefaultBranch && !resolvedBranch) {
       throw new CliError("Branch is required to trigger a build.", [
         "Pass --branch <name> or use --default-branch to use the job default.",
       ]);
@@ -130,10 +122,10 @@ export async function runBuild(options: BuildOptions): Promise<BuildRunResult> {
       // Best-effort only.
     }
 
-    const params = defaultBranch ? {} : { [branchParam]: resolvedBranch };
+    const params = useDefaultBranch ? {} : { [branchParam]: resolvedBranch };
     const result = await options.client.triggerBuild(resolvedJobUrl, params);
 
-    if (!defaultBranch && resolvedBranch) {
+    if (!useDefaultBranch && resolvedBranch) {
       try {
         await recordBranchSelection({
           env: options.env,
@@ -172,7 +164,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildRunResult> {
       scriptName: getScriptName(),
       jobUrl: resolvedJobUrl,
       branch: resolvedBranch,
-      defaultBranch,
+      defaultBranch: useDefaultBranch,
       branchParam,
       watch: shouldWatch,
     });
@@ -951,6 +943,105 @@ function createWatchCancelSignal(): WatchCancelSignal | null {
   };
 }
 
+async function resolveInteractiveBuildSelection(options: {
+  client: JenkinsClient;
+  env: EnvConfig;
+  job?: string;
+  jobUrl?: string;
+  branch?: string;
+  defaultBranch: boolean;
+}): Promise<{
+  jobUrl: string;
+  jobLabel: string;
+  matchedFromSearch: boolean;
+  branch: string;
+  defaultBranch: boolean;
+}> {
+  const providedUrl = options.jobUrl?.trim() ?? "";
+  if (providedUrl) {
+    ensureValidUrl(providedUrl, "job-url");
+  }
+
+  const query = options.job?.trim() ?? "";
+  let jobs: Awaited<ReturnType<typeof loadJobs>> = [];
+  let recentJobs: { url: string; label: string }[] = [];
+  let selectedJobLabel = providedUrl || undefined;
+
+  if (!providedUrl) {
+    jobs = await loadJobs({
+      client: options.client,
+      env: options.env,
+      nonInteractive: false,
+      confirmRefresh: async (reason) => {
+        const response = await confirm({
+          message: `${reason} Refresh now?`,
+          initialValue: true,
+        });
+        if (isCancel(response)) {
+          throw new CliError("Operation cancelled.");
+        }
+        return response;
+      },
+    });
+
+    if (jobs.length === 0) {
+      throw new CliError("No jobs found in cache.", [
+        "Run `jenkins-cli list --refresh` to fetch jobs from Jenkins.",
+      ]);
+    }
+
+    recentJobs = query ? [] : await loadRecentJobs({ env: options.env });
+  }
+
+  const context: BuildPreContext = {
+    env: options.env,
+    jobs,
+    recentJobs,
+    searchQuery: query,
+    searchCandidates: [],
+    selectedJobUrl: providedUrl || undefined,
+    selectedJobLabel,
+    branch: options.branch,
+    defaultBranch: options.defaultBranch,
+    branchChoices: [],
+    removableBranches: [],
+  };
+
+  const result = await runFlow({
+    definition: flowDefinitions.build_pre,
+    handlers: buildPreFlowHandlers,
+    prompts: { confirm, isCancel, select, text },
+    context,
+    ...(providedUrl ? { startStateId: "prepare_branch" } : {}),
+  });
+
+  if (result.terminal === "exit_command") {
+    throw new CliError("Operation cancelled.");
+  }
+
+  if (result.terminal !== "complete") {
+    throw new Error(
+      `Unexpected terminal "${result.terminal}" from build pre flow.`,
+    );
+  }
+
+  const selectedJobUrl = context.selectedJobUrl?.trim() ?? "";
+  if (!selectedJobUrl) {
+    throw new CliError("Job name is required.");
+  }
+
+  const matchedFromSearch =
+    !providedUrl || selectedJobUrl.toLowerCase() !== providedUrl.toLowerCase();
+
+  return {
+    jobUrl: selectedJobUrl,
+    jobLabel: context.selectedJobLabel || selectedJobUrl,
+    matchedFromSearch,
+    branch: context.branch?.trim() ?? "",
+    defaultBranch: context.defaultBranch,
+  };
+}
+
 async function resolveJobTarget(options: {
   client: JenkinsClient;
   env: EnvConfig;
@@ -990,22 +1081,15 @@ async function resolveJobTarget(options: {
     ]);
   }
 
-  const selection = await resolveJobSelection({
-    env: options.env,
-    job: options.job,
-    nonInteractive: options.nonInteractive,
-  });
-  if (selection.kind === "recent") {
-    const selectedJob = jobs.find((job) => job.url === selection.jobUrl);
-    return {
-      jobUrl: selection.jobUrl,
-      jobLabel: selectedJob ? getJobDisplayName(selectedJob) : selection.label,
-      matchedFromSearch: true,
-    };
+  const query = options.job?.trim() ?? "";
+  if (!query) {
+    throw new CliError("Missing required --job.", [
+      "Pass --job <name> or use --job-url <url>.",
+    ]);
   }
 
-  const selectedJob = await resolveJobSearch({
-    initialQuery: selection.query,
+  const selectedJob = await resolveJobMatch({
+    query,
     jobs,
     nonInteractive: options.nonInteractive,
   });
@@ -1015,88 +1099,6 @@ async function resolveJobTarget(options: {
     jobLabel: getJobDisplayName(selectedJob),
     matchedFromSearch: true,
   };
-}
-
-async function resolveJobSelection(options: {
-  env: EnvConfig;
-  job?: string;
-  nonInteractive: boolean;
-}): Promise<
-  | { kind: "query"; query: string }
-  | { kind: "recent"; jobUrl: string; label: string }
-> {
-  let query = options.job?.trim() ?? "";
-  if (query) {
-    return { kind: "query", query };
-  }
-  if (options.nonInteractive) {
-    throw new CliError("Missing required --job.", [
-      "Pass --job <name> or use --job-url <url>.",
-    ]);
-  }
-  const recentJobs = await loadRecentJobs({ env: options.env });
-  if (recentJobs.length > 0) {
-    const selection = await promptForRecentJobSelection(recentJobs);
-    if (selection.kind === "recent") {
-      return selection;
-    }
-  }
-  return { kind: "query", query: await promptForJobSearch() };
-}
-
-async function resolveJobSearch(options: {
-  initialQuery: string;
-  jobs: JenkinsJob[];
-  nonInteractive: boolean;
-}): Promise<JenkinsJob> {
-  if (options.nonInteractive) {
-    return resolveJobMatch({
-      query: options.initialQuery,
-      jobs: options.jobs,
-      nonInteractive: options.nonInteractive,
-    });
-  }
-
-  let query = options.initialQuery.trim();
-  while (true) {
-    if (!query) {
-      query = await promptForJobSearch();
-    }
-
-    try {
-      const candidates = resolveJobCandidates(query, options.jobs);
-      if (candidates.length === 1) {
-        const onlyCandidate = candidates[0];
-        if (onlyCandidate) {
-          return onlyCandidate;
-        }
-      }
-
-      const selection = await promptForJobSelection(candidates);
-      if (selection.kind === "search") {
-        query = await promptForJobSearch();
-        continue;
-      }
-      return selection.job;
-    } catch (err) {
-      if (err instanceof CliError && shouldRetryJobSearch(err)) {
-        printError(err.message);
-        for (const hint of err.hints) {
-          printHint(hint);
-        }
-        query = await promptForJobSearch();
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-function shouldRetryJobSearch(error: CliError): boolean {
-  if (error.message === "Job name is required.") {
-    return true;
-  }
-  return error.message.startsWith("No jobs match ");
 }
 
 async function resolveBranchValue(options: {
@@ -1127,71 +1129,6 @@ async function resolveBranchValue(options: {
   }
 
   return await promptForBranchEntry();
-}
-
-async function promptForJobSelection(
-  candidates: JenkinsJob[],
-): Promise<JobSelectionResult> {
-  const response = await select({
-    message: "Select a job (press Esc to search again)",
-    options: candidates.map((job) => ({
-      value: job.url,
-      label: getJobDisplayName(job),
-    })),
-  });
-
-  if (isCancel(response)) {
-    return { kind: "search" };
-  }
-
-  const selected = candidates.find((job) => job.url === response);
-  if (!selected) {
-    throw new CliError("Selected job is no longer available.", [
-      "Run `jenkins-cli list --refresh` to update the cache.",
-    ]);
-  }
-
-  return { kind: "job", job: selected };
-}
-
-async function promptForRecentJobSelection(
-  recentJobs: { url: string; label: string }[],
-): Promise<
-  { kind: "recent"; jobUrl: string; label: string } | { kind: "search" }
-> {
-  const searchAction = "__jenkins_cli_search_all__";
-  const options = [
-    { value: searchAction, label: "Search all jobs" },
-    ...recentJobs.map((job) => ({ value: job.url, label: job.label })),
-  ];
-  const response = await select({
-    message: "Recent jobs",
-    options,
-  });
-  if (isCancel(response)) {
-    throw new CliError("Operation cancelled.");
-  }
-  if (response === searchAction) {
-    return { kind: "search" };
-  }
-  const selected = recentJobs.find((job) => job.url === response);
-  if (!selected) {
-    throw new CliError("Selected job is no longer available.", [
-      "Run `jenkins-cli list --refresh` to update the cache.",
-    ]);
-  }
-  return { kind: "recent", jobUrl: selected.url, label: selected.label };
-}
-
-async function promptForJobSearch(): Promise<string> {
-  const response = await text({
-    message: "Job name or description",
-    placeholder: "e.g. api prod deploy",
-  });
-  if (isCancel(response)) {
-    throw new CliError("Operation cancelled.");
-  }
-  return String(response).trim();
 }
 
 async function promptForBranchSelection(options: {

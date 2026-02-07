@@ -1,6 +1,11 @@
 import type { JenkinsJob } from "../types/jenkins";
+import type { EnvConfig } from "../env";
 
-export type FlowId = "list_interactive" | "build_post" | "status_post";
+export type FlowId =
+  | "list_interactive"
+  | "build_pre"
+  | "build_post"
+  | "status_post";
 
 export type StateId = string;
 
@@ -106,6 +111,21 @@ export type BuildPostContext = {
   returnToCaller: boolean;
   selectedAction?: string;
   performAction: (action: string) => Promise<ActionEffectResult>;
+};
+
+export type BuildPreContext = {
+  env: EnvConfig;
+  jobs: JenkinsJob[];
+  recentJobs: { url: string; label: string }[];
+  searchQuery: string;
+  searchCandidates: JenkinsJob[];
+  selectedJobUrl?: string;
+  selectedJobLabel?: string;
+  branch?: string;
+  defaultBranch: boolean;
+  branchChoices: string[];
+  removableBranches: string[];
+  pendingBranchRemoval?: string;
 };
 
 export type StatusPostContext = {
