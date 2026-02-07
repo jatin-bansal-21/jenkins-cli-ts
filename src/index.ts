@@ -40,7 +40,7 @@ async function main(): Promise<void> {
 
   const parser = yargs(rawArgs)
     .scriptName(scriptName)
-    .usage("Usage: $0 <command> [options]")
+    .usage("Usage: $0 [command] [options]")
     .option("non-interactive", {
       type: "boolean",
       default: false,
@@ -100,6 +100,31 @@ async function main(): Promise<void> {
     .command(
       "list",
       "List Jenkins jobs",
+      (yargsInstance) =>
+        yargsInstance
+          .option("search", {
+            type: "string",
+            describe: "Search jobs by name or description",
+          })
+          .option("refresh", {
+            type: "boolean",
+            default: false,
+            describe: "Refresh the job cache from Jenkins",
+          }),
+      async (argv) => {
+        const { env, client } = createContext();
+        await runList({
+          client,
+          env,
+          search: typeof argv.search === "string" ? argv.search : undefined,
+          refresh: Boolean(argv.refresh),
+          nonInteractive: Boolean(argv.nonInteractive),
+        });
+      },
+    )
+    .command(
+      "$0",
+      "List Jenkins jobs (default)",
       (yargsInstance) =>
         yargsInstance
           .option("search", {
@@ -432,7 +457,6 @@ async function main(): Promise<void> {
     )
     .version("version", `Show version (${VERSION})`, VERSION)
     .alias("version", "v")
-    .demandCommand(1, "Missing command. Use --help to see usage.")
     .strict()
     .help()
     .epilog(

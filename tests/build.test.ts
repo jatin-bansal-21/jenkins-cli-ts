@@ -172,4 +172,150 @@ describe("build command", () => {
 
     expect(commandLine).toContain("jenkins-cli build --non-interactive");
   });
+
+  test("watch cancellation still opens post-build action menu", async () => {
+    const getJobStatus = mock(async () => ({ lastBuildNumber: 380 }));
+    const triggerBuild = mock(async () => ({
+      buildUrl: BUILD_URL,
+      buildNumber: 381,
+      queueUrl: QUEUE_URL,
+      jobUrl: JOB_URL,
+    }));
+    const getBuildStatus = mock(async () => {
+      process.stdin.emit("data", "\u001b");
+      return {
+        buildNumber: 381,
+        buildUrl: BUILD_URL,
+        result: undefined,
+        building: true,
+      };
+    });
+
+    selectMock.mockImplementationOnce(async () => "done");
+
+    const stdinIsTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const stdoutIsTTY = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      "isTTY",
+    );
+
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    try {
+      await runBuild({
+        client: createClient({
+          getJobStatus,
+          triggerBuild,
+          getBuildStatus,
+        }),
+        env: {} as EnvConfig,
+        jobUrl: JOB_URL,
+        branch: "staging",
+        nonInteractive: false,
+        watch: true,
+        returnToCaller: true,
+      });
+    } finally {
+      if (stdinIsTTY) {
+        Object.defineProperty(process.stdin, "isTTY", stdinIsTTY);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+      if (stdoutIsTTY) {
+        Object.defineProperty(process.stdout, "isTTY", stdoutIsTTY);
+      } else {
+        Reflect.deleteProperty(process.stdout, "isTTY");
+      }
+    }
+
+    expect(getBuildStatus).toHaveBeenCalledTimes(1);
+    expect(selectMock).toHaveBeenCalledTimes(1);
+    expect(selectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Next action for https://jenkins.example.com/job/crypto-order-matching-engine/",
+      }),
+    );
+    expect(notifyBuildCompleteMock).toHaveBeenCalledTimes(0);
+  });
+
+  test("watch cancellation still reaches trigger-another-build confirmation", async () => {
+    const getJobStatus = mock(async () => ({ lastBuildNumber: 380 }));
+    const triggerBuild = mock(async () => ({
+      buildUrl: BUILD_URL,
+      buildNumber: 381,
+      queueUrl: QUEUE_URL,
+      jobUrl: JOB_URL,
+    }));
+    const getBuildStatus = mock(async () => {
+      process.stdin.emit("data", "\u001b");
+      return {
+        buildNumber: 381,
+        buildUrl: BUILD_URL,
+        result: undefined,
+        building: true,
+      };
+    });
+
+    // First confirm is "Trigger another build?" because watch is fixed by flag.
+    confirmMock.mockImplementationOnce(async () => false);
+    selectMock.mockImplementationOnce(async () => "done");
+
+    const stdinIsTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const stdoutIsTTY = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      "isTTY",
+    );
+
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: true,
+    });
+
+    try {
+      await runBuild({
+        client: createClient({
+          getJobStatus,
+          triggerBuild,
+          getBuildStatus,
+        }),
+        env: {} as EnvConfig,
+        jobUrl: JOB_URL,
+        branch: "staging",
+        nonInteractive: false,
+        watch: true,
+      });
+    } finally {
+      if (stdinIsTTY) {
+        Object.defineProperty(process.stdin, "isTTY", stdinIsTTY);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+      if (stdoutIsTTY) {
+        Object.defineProperty(process.stdout, "isTTY", stdoutIsTTY);
+      } else {
+        Reflect.deleteProperty(process.stdout, "isTTY");
+      }
+    }
+
+    expect(getBuildStatus).toHaveBeenCalledTimes(1);
+    expect(selectMock).toHaveBeenCalledTimes(1);
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Trigger another build?",
+      }),
+    );
+  });
 });

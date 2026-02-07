@@ -182,9 +182,6 @@ export async function runBuild(options: BuildOptions): Promise<void> {
         queueUrl: activeBuild.queueUrl,
         baselineBuildNumber,
       });
-      if (finalStatus.cancelled) {
-        return;
-      }
       if (!finalStatus.cancelled) {
         await notifyBuildComplete({
           message: formatNotificationMessage({

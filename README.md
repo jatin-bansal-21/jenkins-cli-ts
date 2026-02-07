@@ -69,6 +69,7 @@ If you have not installed the global CLI, replace `jenkins-cli` with
 Output format notes:
 
 - Commands return parseable output prefixed with `OK:` and `HINT:` where relevant.
+- Running `jenkins-cli` with no command defaults to `list`.
 
 List jobs (uses local cache by default):
 
