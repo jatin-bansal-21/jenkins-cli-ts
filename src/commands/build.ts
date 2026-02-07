@@ -51,6 +51,7 @@ type BuildOptions = {
   defaultBranch?: boolean;
   nonInteractive: boolean;
   watch?: boolean;
+  returnToCaller?: boolean;
 };
 
 type JobSelectionResult = { kind: "job"; job: JenkinsJob } | { kind: "search" };
@@ -116,6 +117,15 @@ export async function runBuild(options: BuildOptions): Promise<void> {
       ]);
     }
 
+    let baselineBuildNumber: number | undefined;
+    try {
+      const preTriggerStatus =
+        await options.client.getJobStatus(resolvedJobUrl);
+      baselineBuildNumber = preTriggerStatus.lastBuildNumber;
+    } catch {
+      // Best-effort only.
+    }
+
     const params = defaultBranch ? {} : { [branchParam]: resolvedBranch };
     const result = await options.client.triggerBuild(resolvedJobUrl, params);
 
@@ -167,7 +177,11 @@ export async function runBuild(options: BuildOptions): Promise<void> {
         buildUrl: activeBuild.buildUrl,
         buildNumber: activeBuild.buildNumber,
         queueUrl: activeBuild.queueUrl,
+        baselineBuildNumber,
       });
+      if (finalStatus.cancelled) {
+        return;
+      }
       if (!finalStatus.cancelled) {
         await notifyBuildComplete({
           message: formatNotificationMessage({
@@ -191,6 +205,10 @@ export async function runBuild(options: BuildOptions): Promise<void> {
       params,
       activeBuild,
     });
+
+    if (options.returnToCaller) {
+      return;
+    }
 
     const rerunCommand = formatNonInteractiveBuildCommand({
       scriptName: getScriptName(),
@@ -389,6 +407,14 @@ async function runBuildOnce(options: {
     ]);
   }
 
+  let baselineBuildNumber: number | undefined;
+  try {
+    const preTriggerStatus = await options.client.getJobStatus(jobUrl);
+    baselineBuildNumber = preTriggerStatus.lastBuildNumber;
+  } catch {
+    // Best-effort only.
+  }
+
   const params = options.defaultBranch ? {} : { [options.branchParam]: branch };
   const result = await options.client.triggerBuild(jobUrl, params);
 
@@ -435,7 +461,11 @@ async function runBuildOnce(options: {
       buildUrl: result.buildUrl,
       buildNumber: result.buildNumber,
       queueUrl: result.queueUrl,
+      baselineBuildNumber,
     });
+    if (finalStatus.cancelled) {
+      return;
+    }
     if (!finalStatus.cancelled) {
       await notifyBuildComplete({
         message: formatNotificationMessage({
@@ -553,6 +583,7 @@ async function watchBuildStatus(options: {
   buildUrl?: string;
   buildNumber?: number;
   queueUrl?: string;
+  baselineBuildNumber?: number;
 }): Promise<{ result: string; buildNumber?: number; cancelled?: boolean }> {
   const pollIntervalMs = 30_000;
   const useSpinner = Boolean(process.stdout.isTTY);
@@ -568,10 +599,10 @@ async function watchBuildStatus(options: {
   let buildNumber = options.buildNumber;
   let queueUrl = options.queueUrl;
 
-  let baselineBuildNumber: number | undefined;
+  let baselineBuildNumber = options.baselineBuildNumber;
   let targetBuildNumber: number | undefined;
 
-  if (!buildUrl && !queueUrl) {
+  if (!buildUrl && baselineBuildNumber === undefined) {
     const initialStatus = await options.client.getJobStatus(options.jobUrl);
     baselineBuildNumber = initialStatus.lastBuildNumber;
     if (initialStatus.lastBuildNumber && initialStatus.building) {
@@ -618,6 +649,31 @@ async function watchBuildStatus(options: {
         if (queueItem?.buildUrl) {
           buildUrl = queueItem.buildUrl;
           buildNumber = queueItem.buildNumber;
+          continue;
+        }
+        const fallbackStatus = await options.client.getJobStatus(
+          options.jobUrl,
+        );
+        const currentNumber = fallbackStatus.lastBuildNumber;
+        if (
+          targetBuildNumber === undefined &&
+          typeof currentNumber === "number" &&
+          (baselineBuildNumber === undefined ||
+            currentNumber !== baselineBuildNumber ||
+            fallbackStatus.building)
+        ) {
+          targetBuildNumber = currentNumber;
+        }
+        if (
+          typeof currentNumber === "number" &&
+          typeof targetBuildNumber === "number" &&
+          currentNumber === targetBuildNumber
+        ) {
+          queueUrl = undefined;
+          buildNumber = currentNumber;
+          if (fallbackStatus.lastBuildUrl) {
+            buildUrl = fallbackStatus.lastBuildUrl;
+          }
           continue;
         }
         const elapsedMs = Date.now() - watchStartMs;

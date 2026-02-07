@@ -568,6 +568,7 @@ async function runStatusActionMenu(options: {
         branchParam: options.env.branchParamDefault,
         defaultBranch: false,
         nonInteractive: false,
+        returnToCaller: true,
       });
       continue;
     }

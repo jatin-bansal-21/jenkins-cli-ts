@@ -165,6 +165,23 @@ export async function waitForBuild(options: {
   if (!buildUrl && !queueUrl && options.jobUrl) {
     const initialStatus = await options.client.getJobStatus(options.jobUrl);
     baselineBuildNumber = initialStatus.lastBuildNumber;
+    if (initialStatus.lastBuildNumber && !initialStatus.building) {
+      if (statusSpinner) {
+        statusSpinner.stop("Build already completed.");
+      }
+      const finalBuildUrl = initialStatus.lastBuildUrl || options.jobUrl;
+      printFinalJobStatus(
+        options.jobLabel,
+        initialStatus.lastBuildNumber,
+        initialStatus,
+        finalBuildUrl,
+      );
+      return {
+        result: initialStatus.result || "UNKNOWN",
+        buildNumber: initialStatus.lastBuildNumber,
+        buildUrl: finalBuildUrl,
+      };
+    }
     if (initialStatus.building && initialStatus.lastBuildNumber) {
       targetBuildNumber = initialStatus.lastBuildNumber;
     }
@@ -210,6 +227,33 @@ export async function waitForBuild(options: {
           buildNumber = queued.buildNumber;
           queueUrl = undefined;
           continue;
+        }
+        if (options.jobUrl) {
+          const fallbackStatus = await options.client.getJobStatus(
+            options.jobUrl,
+          );
+          const currentNumber = fallbackStatus.lastBuildNumber;
+          if (
+            targetBuildNumber === undefined &&
+            typeof currentNumber === "number" &&
+            (baselineBuildNumber === undefined ||
+              currentNumber !== baselineBuildNumber ||
+              fallbackStatus.building)
+          ) {
+            targetBuildNumber = currentNumber;
+          }
+          if (
+            typeof currentNumber === "number" &&
+            typeof targetBuildNumber === "number" &&
+            currentNumber === targetBuildNumber
+          ) {
+            queueUrl = undefined;
+            buildNumber = currentNumber;
+            if (fallbackStatus.lastBuildUrl) {
+              buildUrl = fallbackStatus.lastBuildUrl;
+            }
+            continue;
+          }
         }
         emitProgress({
           spinnerInstance: statusSpinner,

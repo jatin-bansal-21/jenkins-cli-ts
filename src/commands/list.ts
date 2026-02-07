@@ -190,6 +190,7 @@ async function runJobActionMenu(options: {
         jobUrl: options.job.url,
         branchParam: options.env.branchParamDefault,
         nonInteractive: false,
+        returnToCaller: true,
       });
       continue;
     }
