@@ -52,6 +52,24 @@ export type BuildStatus = {
   };
 };
 
+export type QueueItemSummary = {
+  id: number;
+  queueUrl: string;
+  jobName?: string;
+  jobUrl?: string;
+  reason?: string;
+  inQueueSince?: number;
+  blocked?: boolean;
+  buildable?: boolean;
+  stuck?: boolean;
+};
+
+export type ConsoleChunk = {
+  text: string;
+  nextStart: number;
+  hasMore: boolean;
+};
+
 type BuildAction = {
   parameters?: { name?: string; value?: unknown }[];
 };
@@ -70,7 +88,15 @@ type BuildDetails = {
 
 type QueueItem = {
   id?: number;
+  url?: string;
+  why?: string;
+  inQueueSince?: number;
+  blocked?: boolean;
+  buildable?: boolean;
+  stuck?: boolean;
+  cancelled?: boolean;
   task?: {
+    name?: string;
     url?: string;
   };
   executable?: {
@@ -231,6 +257,116 @@ export class JenkinsClient {
     };
   }
 
+  async listQueueItems(): Promise<QueueItemSummary[]> {
+    const url = this.withBase(
+      "queue/api/json?tree=items[id,url,why,inQueueSince,blocked,buildable,stuck,cancelled,task[name,url]]",
+    );
+    const payload = await this.requestJson<{ items?: QueueItem[] }>(
+      url,
+      "list queue items",
+    );
+    if (!Array.isArray(payload.items)) {
+      return [];
+    }
+
+    return payload.items
+      .filter(
+        (item): item is QueueItem & { id: number } =>
+          typeof item.id === "number" && Number.isFinite(item.id),
+      )
+      .filter((item) => !item.cancelled)
+      .map((item) => ({
+        id: item.id,
+        queueUrl: item.url
+          ? this.resolveUrl(item.url)
+          : this.withBase(`queue/item/${item.id}/`),
+        jobName: item.task?.name,
+        jobUrl: item.task?.url,
+        reason: item.why,
+        inQueueSince: item.inQueueSince,
+        blocked: item.blocked,
+        buildable: item.buildable,
+        stuck: item.stuck,
+      }));
+  }
+
+  async cancelQueueItem(queueUrl: string): Promise<boolean> {
+    const queueItem = await this.getQueueItem(queueUrl);
+    if (!queueItem || typeof queueItem.id !== "number") {
+      return false;
+    }
+    await this.cancelQueueItemById(queueItem.id);
+    return true;
+  }
+
+  async cancelQueueItemById(queueId: number): Promise<void> {
+    if (!Number.isFinite(queueId) || queueId <= 0) {
+      throw new CliError("Invalid queue id.", [
+        "Provide a valid queue item id (e.g. 123).",
+      ]);
+    }
+    const url = this.withBase(`queue/cancelItem?id=${queueId}`);
+    await this.postWithCrumb(url, "cancel queue item");
+  }
+
+  async stopBuild(buildUrl: string): Promise<void> {
+    const url = this.withJob(buildUrl, "stop");
+    await this.postWithCrumb(url, "stop build");
+  }
+
+  async getConsoleChunk(buildUrl: string, start = 0): Promise<ConsoleChunk> {
+    const normalizedStart =
+      Number.isFinite(start) && start > 0 ? Math.floor(start) : 0;
+    const url = new URL(this.withJob(buildUrl, "logText/progressiveText"));
+    url.searchParams.set("start", String(normalizedStart));
+
+    const response = await this.fetchWithTimeout(
+      url.toString(),
+      { method: "GET", headers: this.authHeaders() },
+      1,
+      "fetch build logs",
+    );
+    if (!response.ok) {
+      await this.raiseHttpError(response, "fetch build logs");
+    }
+
+    const text = await response.text();
+    const textSizeHeader = response.headers.get("x-text-size");
+    const parsedNextStart = textSizeHeader ? Number(textSizeHeader) : NaN;
+    const nextStart = Number.isFinite(parsedNextStart)
+      ? parsedNextStart
+      : normalizedStart + text.length;
+    const hasMore = (response.headers.get("x-more-data") || "")
+      .toLowerCase()
+      .trim();
+
+    return {
+      text,
+      nextStart,
+      hasMore: hasMore === "true",
+    };
+  }
+
+  async getLastFailedBuild(
+    jobUrl: string,
+  ): Promise<{ buildUrl: string; buildNumber?: number } | null> {
+    const url = this.withJob(
+      jobUrl,
+      "api/json?tree=lastFailedBuild[url,number]",
+    );
+    const payload = await this.requestJson<{
+      lastFailedBuild?: { url?: string; number?: number };
+    }>(url, "fetch last failed build");
+    const build = payload.lastFailedBuild;
+    if (!build?.url) {
+      return null;
+    }
+    return {
+      buildUrl: build.url,
+      buildNumber: build.number,
+    };
+  }
+
   async triggerBuild(
     jobUrl: string,
     params: Record<string, string>,
@@ -271,6 +407,36 @@ export class JenkinsClient {
       buildUrl: queueItem?.executable?.url,
       buildNumber: queueItem?.executable?.number,
     };
+  }
+
+  private async postWithCrumb(
+    url: string,
+    context: string,
+    body?: string,
+  ): Promise<void> {
+    const crumb = await this.getCrumb();
+    const headers: Record<string, string> = {
+      Authorization: this.authHeader,
+    };
+    if (body !== undefined) {
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+    }
+    if (crumb) {
+      headers[crumb.field] = crumb.value;
+    }
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers,
+        ...(body !== undefined ? { body } : {}),
+      },
+      1,
+      context,
+    );
+    if (!response.ok) {
+      await this.raiseHttpError(response, context);
+    }
   }
 
   private async getCrumb(): Promise<Crumb | null> {

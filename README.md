@@ -71,6 +71,11 @@ List jobs (uses local cache by default):
 jenkins-cli list
 ```
 
+In interactive mode, `list` acts as a launcher:
+
+- Search and select a job
+- Run `Build`, `Status`, `Watch`, `Logs`, `Cancel`, or `Rerun`
+
 Refresh the cache from Jenkins:
 
 ```bash
@@ -107,6 +112,41 @@ Check status:
 
 ```bash
 jenkins-cli status --job "api-prod"
+```
+
+Watch the latest build status from status command:
+
+```bash
+jenkins-cli status --job "api-prod" --watch
+```
+
+Wait for a build to finish:
+
+```bash
+jenkins-cli wait --job "api-prod" --timeout 30m --interval 10s
+jenkins-cli wait --build-url "https://jenkins.example.com/job/api-prod/184/"
+jenkins-cli wait --queue-url "https://jenkins.example.com/queue/item/123/"
+```
+
+Stream logs:
+
+```bash
+jenkins-cli logs --job "api-prod" --follow
+jenkins-cli logs --build-url "https://jenkins.example.com/job/api-prod/184/" --no-follow
+```
+
+Cancel queued or running work:
+
+```bash
+jenkins-cli cancel --job "api-prod"
+jenkins-cli cancel --queue-url "https://jenkins.example.com/queue/item/123/"
+jenkins-cli cancel --build-url "https://jenkins.example.com/job/api-prod/184/"
+```
+
+Rerun from last failed build:
+
+```bash
+jenkins-cli rerun --job "api-prod"
 ```
 
 ## Update
@@ -199,3 +239,5 @@ Commands print `OK:` on success.
 - `build`/`deploy` uses `buildWithParameters`; branch is required unless you pass
   `--default-branch`.
 - Use `--non-interactive` to disable prompts and fail fast.
+- `wait` exit codes: `0` success, `1` non-success, `124` timeout, `130`
+  interrupted.

@@ -18,15 +18,15 @@ const jobs: JenkinsJob[] = [
 const loadJobsMock = mock(async () => jobs);
 const confirmMock = mock(() => true);
 const isCancelMock = mock(() => false);
-const questionMock = mock(async () => "");
-const closeMock = mock(() => undefined);
-const onMock = mock(() => undefined);
-const createInterfaceMock = mock(() => ({
-  question: questionMock,
-  close: closeMock,
-  history: [] as string[],
-  on: onMock,
-}));
+const selectMock = mock(async () => "__jenkins_cli_exit__");
+const textMock = mock(async () => "q");
+
+const runBuildMock = mock(async () => undefined);
+const runStatusMock = mock(async () => undefined);
+const runWaitMock = mock(async () => undefined);
+const runLogsMock = mock(async () => undefined);
+const runCancelMock = mock(async () => undefined);
+const runRerunMock = mock(async () => undefined);
 
 mock.module("../src/jobs", () => ({
   loadJobs: loadJobsMock,
@@ -41,10 +41,27 @@ mock.module("../src/jobs", () => ({
 mock.module("@clack/prompts", () => ({
   confirm: confirmMock,
   isCancel: isCancelMock,
+  select: selectMock,
+  text: textMock,
 }));
 
-mock.module("node:readline/promises", () => ({
-  createInterface: createInterfaceMock,
+mock.module("../src/commands/build", () => ({
+  runBuild: runBuildMock,
+}));
+mock.module("../src/commands/status", () => ({
+  runStatus: runStatusMock,
+}));
+mock.module("../src/commands/wait", () => ({
+  runWait: runWaitMock,
+}));
+mock.module("../src/commands/logs", () => ({
+  runLogs: runLogsMock,
+}));
+mock.module("../src/commands/cancel", () => ({
+  runCancel: runCancelMock,
+}));
+mock.module("../src/commands/rerun", () => ({
+  runRerun: runRerunMock,
 }));
 
 const { runList } = await import("../src/commands/list");
@@ -58,26 +75,30 @@ describe("runList", () => {
     confirmMock.mockImplementation(() => true);
     isCancelMock.mockReset();
     isCancelMock.mockImplementation(() => false);
-    questionMock.mockReset();
-    questionMock.mockImplementation(async () => "");
-    closeMock.mockReset();
-    closeMock.mockImplementation(() => undefined);
-    onMock.mockReset();
-    onMock.mockImplementation(() => undefined);
-    createInterfaceMock.mockReset();
-    createInterfaceMock.mockImplementation(() => ({
-      question: questionMock,
-      close: closeMock,
-      history: [] as string[],
-      on: onMock,
-    }));
+    selectMock.mockReset();
+    selectMock.mockImplementation(async () => "__jenkins_cli_exit__");
+    textMock.mockReset();
+    textMock.mockImplementation(async () => "q");
+
+    runBuildMock.mockReset();
+    runBuildMock.mockImplementation(async () => undefined);
+    runStatusMock.mockReset();
+    runStatusMock.mockImplementation(async () => undefined);
+    runWaitMock.mockReset();
+    runWaitMock.mockImplementation(async () => undefined);
+    runLogsMock.mockReset();
+    runLogsMock.mockImplementation(async () => undefined);
+    runCancelMock.mockReset();
+    runCancelMock.mockImplementation(async () => undefined);
+    runRerunMock.mockReset();
+    runRerunMock.mockImplementation(async () => undefined);
   });
 
   afterEach(() => {
     mock.restore();
   });
 
-  test("non-interactive runs once without prompting", async () => {
+  test("non-interactive prints matching jobs", async () => {
     const logSpy = spyOn(console, "log");
 
     await runList({
@@ -88,42 +109,17 @@ describe("runList", () => {
       nonInteractive: true,
     });
 
-    expect(createInterfaceMock).toHaveBeenCalledTimes(0);
-    expect(questionMock).toHaveBeenCalledTimes(0);
+    expect(textMock).toHaveBeenCalledTimes(0);
+    expect(selectMock).toHaveBeenCalledTimes(0);
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0]?.[0]).toBe(
       "alpha  https://jenkins.example.com/job/alpha",
     );
   });
 
-  test("interactive empty input lists all and continues until exit", async () => {
-    questionMock.mockImplementationOnce(async () => "");
-    questionMock.mockImplementationOnce(async () => "q");
-
+  test("interactive uses initial search and exits from menu", async () => {
     const logSpy = spyOn(console, "log");
-
-    await runList({
-      client: {} as JenkinsClient,
-      env: {} as EnvConfig,
-      refresh: false,
-      nonInteractive: false,
-    });
-
-    expect(createInterfaceMock).toHaveBeenCalledTimes(1);
-    expect(questionMock).toHaveBeenCalledTimes(2);
-    expect(logSpy).toHaveBeenCalledTimes(2);
-    expect(logSpy.mock.calls[0]?.[0]).toBe(
-      "alpha  https://jenkins.example.com/job/alpha",
-    );
-    expect(logSpy.mock.calls[1]?.[0]).toBe(
-      "beta  https://jenkins.example.com/job/beta",
-    );
-  });
-
-  test("interactive uses initial search before prompting again", async () => {
-    questionMock.mockImplementationOnce(async () => "q");
-
-    const logSpy = spyOn(console, "log");
+    selectMock.mockImplementationOnce(async () => "__jenkins_cli_exit__");
 
     await runList({
       client: {} as JenkinsClient,
@@ -133,11 +129,39 @@ describe("runList", () => {
       nonInteractive: false,
     });
 
-    expect(createInterfaceMock).toHaveBeenCalledTimes(1);
-    expect(questionMock).toHaveBeenCalledTimes(1);
+    expect(textMock).toHaveBeenCalledTimes(0);
+    expect(selectMock).toHaveBeenCalledTimes(1);
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(logSpy.mock.calls[0]?.[0]).toBe(
       "beta  https://jenkins.example.com/job/beta",
+    );
+  });
+
+  test("interactive routes selected action to watch command", async () => {
+    const logSpy = spyOn(console, "log");
+    textMock
+      .mockImplementationOnce(async () => "alpha")
+      .mockImplementationOnce(async () => "q");
+    selectMock
+      .mockImplementationOnce(
+        async () => "https://jenkins.example.com/job/alpha",
+      )
+      .mockImplementationOnce(async () => "watch")
+      .mockImplementationOnce(async () => "search");
+
+    await runList({
+      client: {} as JenkinsClient,
+      env: { branchParamDefault: "BRANCH" } as EnvConfig,
+      refresh: false,
+      nonInteractive: false,
+    });
+
+    expect(runWaitMock).toHaveBeenCalledTimes(1);
+    expect(runWaitMock.mock.calls[0]?.[0]).toMatchObject({
+      jobUrl: "https://jenkins.example.com/job/alpha",
+    });
+    expect(logSpy).toHaveBeenCalledWith(
+      "alpha  https://jenkins.example.com/job/alpha",
     );
   });
 });

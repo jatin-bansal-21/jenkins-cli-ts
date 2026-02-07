@@ -7,10 +7,14 @@ import yargs from "yargs/yargs";
 import { hideBin } from "yargs/helpers";
 import { CliError, getScriptName, handleCliError } from "./cli";
 import { runBuild } from "./commands/build";
+import { runCancel } from "./commands/cancel";
 import { runLogin } from "./commands/login";
 import { runList } from "./commands/list";
+import { runLogs } from "./commands/logs";
+import { runRerun } from "./commands/rerun";
 import { runStatus } from "./commands/status";
 import { runUpdate } from "./commands/update";
+import { runWait } from "./commands/wait";
 import { loadEnv, getDebugDefault } from "./env";
 import { JenkinsClient } from "./jenkins/client";
 import { getJobCachePath } from "./jobs";
@@ -188,10 +192,178 @@ async function main(): Promise<void> {
           .option("job-url", {
             type: "string",
             describe: "Full Jenkins job URL",
+          })
+          .option("watch", {
+            type: "boolean",
+            default: false,
+            describe: "Watch latest build status until completion",
           }),
       async (argv) => {
         const { env, client } = createContext();
+        const rawArgs = hideBin(process.argv);
+        const watchExplicitlyPassed = rawArgs.some(
+          (arg) =>
+            arg === "--watch" ||
+            arg === "--no-watch" ||
+            arg.startsWith("--watch=") ||
+            arg.startsWith("--no-watch="),
+        );
         await runStatus({
+          client,
+          env,
+          job: typeof argv.job === "string" ? argv.job : undefined,
+          jobUrl: typeof argv.jobUrl === "string" ? argv.jobUrl : undefined,
+          nonInteractive: Boolean(argv.nonInteractive),
+          watch: watchExplicitlyPassed ? Boolean(argv.watch) : undefined,
+        });
+      },
+    )
+    .command(
+      "wait",
+      "Wait for a Jenkins build to finish",
+      (yargsInstance) =>
+        yargsInstance
+          .option("job", {
+            type: "string",
+            describe: "Job name or description",
+          })
+          .option("job-url", {
+            type: "string",
+            describe: "Full Jenkins job URL",
+          })
+          .option("build-url", {
+            type: "string",
+            describe: "Full Jenkins build URL",
+          })
+          .option("queue-url", {
+            type: "string",
+            describe: "Full Jenkins queue item URL",
+          })
+          .option("interval", {
+            type: "string",
+            describe: "Polling interval (e.g. 10s, 1m)",
+          })
+          .option("timeout", {
+            type: "string",
+            describe: "Timeout (e.g. 30m, 2h)",
+          }),
+      async (argv) => {
+        const { env, client } = createContext();
+        await runWait({
+          client,
+          env,
+          job: typeof argv.job === "string" ? argv.job : undefined,
+          jobUrl: typeof argv.jobUrl === "string" ? argv.jobUrl : undefined,
+          buildUrl:
+            typeof argv.buildUrl === "string" ? argv.buildUrl : undefined,
+          queueUrl:
+            typeof argv.queueUrl === "string" ? argv.queueUrl : undefined,
+          interval:
+            typeof argv.interval === "string" ? argv.interval : undefined,
+          timeout: typeof argv.timeout === "string" ? argv.timeout : undefined,
+          nonInteractive: Boolean(argv.nonInteractive),
+        });
+      },
+    )
+    .command(
+      "logs",
+      "Stream Jenkins build logs",
+      (yargsInstance) =>
+        yargsInstance
+          .option("job", {
+            type: "string",
+            describe: "Job name or description",
+          })
+          .option("job-url", {
+            type: "string",
+            describe: "Full Jenkins job URL",
+          })
+          .option("build-url", {
+            type: "string",
+            describe: "Full Jenkins build URL",
+          })
+          .option("queue-url", {
+            type: "string",
+            describe: "Full Jenkins queue item URL",
+          })
+          .option("follow", {
+            type: "boolean",
+            default: true,
+            describe: "Keep streaming logs until build completes",
+          })
+          .option("poll", {
+            type: "string",
+            describe: "Polling interval when following (e.g. 2s)",
+          }),
+      async (argv) => {
+        const { env, client } = createContext();
+        await runLogs({
+          client,
+          env,
+          job: typeof argv.job === "string" ? argv.job : undefined,
+          jobUrl: typeof argv.jobUrl === "string" ? argv.jobUrl : undefined,
+          buildUrl:
+            typeof argv.buildUrl === "string" ? argv.buildUrl : undefined,
+          queueUrl:
+            typeof argv.queueUrl === "string" ? argv.queueUrl : undefined,
+          follow: Boolean(argv.follow),
+          poll: typeof argv.poll === "string" ? argv.poll : undefined,
+          nonInteractive: Boolean(argv.nonInteractive),
+        });
+      },
+    )
+    .command(
+      "cancel",
+      "Cancel a queued or running build",
+      (yargsInstance) =>
+        yargsInstance
+          .option("job", {
+            type: "string",
+            describe: "Job name or description",
+          })
+          .option("job-url", {
+            type: "string",
+            describe: "Full Jenkins job URL",
+          })
+          .option("build-url", {
+            type: "string",
+            describe: "Full Jenkins build URL",
+          })
+          .option("queue-url", {
+            type: "string",
+            describe: "Full Jenkins queue item URL",
+          }),
+      async (argv) => {
+        const { env, client } = createContext();
+        await runCancel({
+          client,
+          env,
+          job: typeof argv.job === "string" ? argv.job : undefined,
+          jobUrl: typeof argv.jobUrl === "string" ? argv.jobUrl : undefined,
+          buildUrl:
+            typeof argv.buildUrl === "string" ? argv.buildUrl : undefined,
+          queueUrl:
+            typeof argv.queueUrl === "string" ? argv.queueUrl : undefined,
+          nonInteractive: Boolean(argv.nonInteractive),
+        });
+      },
+    )
+    .command(
+      "rerun",
+      "Rerun the last failed build for a job",
+      (yargsInstance) =>
+        yargsInstance
+          .option("job", {
+            type: "string",
+            describe: "Job name or description",
+          })
+          .option("job-url", {
+            type: "string",
+            describe: "Full Jenkins job URL",
+          }),
+      async (argv) => {
+        const { env, client } = createContext();
+        await runRerun({
           client,
           env,
           job: typeof argv.job === "string" ? argv.job : undefined,
@@ -272,6 +444,33 @@ async function main(): Promise<void> {
     --watch           Watch build status until completion
 
   status:
+    --job      Job name or description
+    --job-url  Full Jenkins job URL
+    --watch    Watch latest build status until completion
+
+  wait:
+    --job       Job name or description
+    --job-url   Full Jenkins job URL
+    --build-url Full Jenkins build URL
+    --queue-url Full Jenkins queue item URL
+    --interval  Polling interval (e.g. 10s, 1m)
+    --timeout   Timeout (e.g. 30m, 2h)
+
+  logs:
+    --job       Job name or description
+    --job-url   Full Jenkins job URL
+    --build-url Full Jenkins build URL
+    --queue-url Full Jenkins queue item URL
+    --follow    Keep streaming logs until build completes [default: true]
+    --poll      Polling interval when following (e.g. 2s)
+
+  cancel:
+    --job       Job name or description
+    --job-url   Full Jenkins job URL
+    --build-url Full Jenkins build URL
+    --queue-url Full Jenkins queue item URL
+
+  rerun:
     --job      Job name or description
     --job-url  Full Jenkins job URL
 

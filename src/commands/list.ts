@@ -2,11 +2,16 @@
  * List command implementation.
  * Displays all cached Jenkins jobs with optional search filtering.
  */
-import { confirm, isCancel } from "@clack/prompts";
-import { createInterface } from "node:readline/promises";
+import { confirm, isCancel, select, text } from "@clack/prompts";
 import { CliError, printOk } from "../cli";
+import { runBuild } from "./build";
+import { runCancel } from "./cancel";
+import { runLogs } from "./logs";
+import { runRerun } from "./rerun";
+import { runStatus } from "./status";
+import { runWait } from "./wait";
 import type { EnvConfig } from "../env";
-import type { JenkinsClient } from "../jenkins/client";
+import type { JenkinsClient, JenkinsJob } from "../jenkins/client";
 import { MIN_SCORE } from "../config/fuzzy";
 import { getJobDisplayName, loadJobs, rankJobs } from "../jobs";
 
@@ -37,16 +42,8 @@ export async function runList(options: ListOptions): Promise<void> {
     },
   });
 
-  const printJobs = (search: string): void => {
-    const jobsToPrint = search
-      ? rankJobs(search, jobs)
-          .filter((match) => match.score >= MIN_SCORE)
-          .map((match) => match.job)
-      : jobs
-          .slice()
-          .sort((a, b) =>
-            getJobDisplayName(a).localeCompare(getJobDisplayName(b)),
-          );
+  const printJobs = (entries: JenkinsJob[], search: string): void => {
+    const jobsToPrint = entries;
 
     if (search && jobsToPrint.length === 0) {
       printOk(`No jobs match "${search}".`);
@@ -65,66 +62,183 @@ export async function runList(options: ListOptions): Promise<void> {
 
   if (options.nonInteractive) {
     const search = options.search?.trim() ?? "";
-    printJobs(search);
+    printJobs(getFilteredJobs(jobs, search), search);
     return;
   }
 
-  const hasInitialSearch = typeof options.search === "string";
-  let pendingSearch = hasInitialSearch ? options.search!.trim() : null;
-
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-    historySize: 1000,
-  });
-
-  let cancelled = false;
-  rl.on("SIGINT", () => {
-    cancelled = true;
-    rl.close();
-  });
-
-  const promptSearch = async (): Promise<string> => {
-    // `readline` gives you Up/Down arrow history navigation automatically.
-    const response = await rl.question(
-      "Search jobs (optional, type q to exit) [e.g. api prod]: ",
-    );
-    return response.trim();
-  };
-
-  try {
-    while (true) {
-      let search = "";
-      if (pendingSearch !== null) {
-        search = pendingSearch;
-        pendingSearch = null;
-        // Make the initial search available via the Up-arrow history too.
-        if (search) {
-          rl.history.unshift(search);
-        }
-      } else {
-        try {
-          search = await promptSearch();
-        } catch (err) {
-          if (cancelled) {
-            throw new CliError("Operation cancelled.");
-          }
-          // Treat EOF / closed input as exit from the interactive loop.
-          if (err instanceof Error && /closed/i.test(err.message)) {
-            return;
-          }
-          throw err;
-        }
-      }
-
-      if (isExitToken(search)) {
-        return;
-      }
-
-      printJobs(search);
+  let pendingSearch = options.search?.trim() ?? "";
+  while (true) {
+    const search = await promptSearch(pendingSearch);
+    pendingSearch = "";
+    if (isExitToken(search)) {
+      return;
     }
-  } finally {
-    rl.close();
+
+    const filteredJobs = getFilteredJobs(jobs, search);
+    if (filteredJobs.length === 0) {
+      printOk(`No jobs match "${search}".`);
+      continue;
+    }
+    printJobs(filteredJobs, search);
+
+    const listAction = await runListActionMenu({
+      client: options.client,
+      env: options.env,
+      jobs: filteredJobs,
+    });
+    if (listAction === "exit") {
+      return;
+    }
+  }
+}
+
+function getFilteredJobs(jobs: JenkinsJob[], search: string): JenkinsJob[] {
+  if (!search) {
+    return jobs
+      .slice()
+      .sort((a, b) => getJobDisplayName(a).localeCompare(getJobDisplayName(b)));
+  }
+  return rankJobs(search, jobs)
+    .filter((match) => match.score >= MIN_SCORE)
+    .map((match) => match.job);
+}
+
+async function promptSearch(initialSearch: string): Promise<string> {
+  if (initialSearch) {
+    return initialSearch;
+  }
+  const response = await text({
+    message: "Search jobs (optional, q to exit)",
+    placeholder: "e.g. api prod",
+  });
+  if (isCancel(response)) {
+    throw new CliError("Operation cancelled.");
+  }
+  return String(response).trim();
+}
+
+async function runListActionMenu(options: {
+  client: JenkinsClient;
+  env: EnvConfig;
+  jobs: JenkinsJob[];
+}): Promise<"search" | "exit"> {
+  const searchAgainValue = "__jenkins_cli_search_again__";
+  const exitValue = "__jenkins_cli_exit__";
+
+  const choice = await select({
+    message: "Select a job to operate on",
+    options: [
+      ...options.jobs.map((job) => ({
+        value: job.url,
+        label: getJobDisplayName(job),
+      })),
+      { value: searchAgainValue, label: "Search again" },
+      { value: exitValue, label: "Exit" },
+    ],
+  });
+  if (isCancel(choice) || choice === exitValue) {
+    return "exit";
+  }
+  if (choice === searchAgainValue) {
+    return "search";
+  }
+
+  const selectedJob = options.jobs.find((job) => job.url === choice);
+  if (!selectedJob) {
+    throw new CliError("Selected job is no longer available.", [
+      "Run `jenkins-cli list --refresh` to update the cache.",
+    ]);
+  }
+  const action = await runJobActionMenu({
+    client: options.client,
+    env: options.env,
+    job: selectedJob,
+  });
+  return action;
+}
+
+async function runJobActionMenu(options: {
+  client: JenkinsClient;
+  env: EnvConfig;
+  job: JenkinsJob;
+}): Promise<"search" | "exit"> {
+  while (true) {
+    const action = await select({
+      message: `Action for ${getJobDisplayName(options.job)}`,
+      options: [
+        { value: "build", label: "Build" },
+        { value: "status", label: "Status" },
+        { value: "watch", label: "Watch" },
+        { value: "logs", label: "Logs" },
+        { value: "cancel", label: "Cancel" },
+        { value: "rerun", label: "Rerun last failed" },
+        { value: "search", label: "Back to search" },
+        { value: "exit", label: "Exit" },
+      ],
+    });
+    if (isCancel(action) || action === "exit") {
+      return "exit";
+    }
+    if (action === "search") {
+      return "search";
+    }
+
+    if (action === "build") {
+      await runBuild({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        branchParam: options.env.branchParamDefault,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "status") {
+      await runStatus({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        nonInteractive: true,
+      });
+      continue;
+    }
+    if (action === "watch") {
+      await runWait({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        nonInteractive: false,
+        suppressExitCode: true,
+      });
+      continue;
+    }
+    if (action === "logs") {
+      await runLogs({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        follow: true,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "cancel") {
+      await runCancel({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "rerun") {
+      await runRerun({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.job.url,
+        nonInteractive: false,
+      });
+      continue;
+    }
   }
 }

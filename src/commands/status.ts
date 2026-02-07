@@ -4,6 +4,11 @@
  */
 import { confirm, isCancel, select, text, multiselect } from "@clack/prompts";
 import { CliError, printError, printHint, printOk } from "../cli";
+import { runBuild } from "./build";
+import { runCancel } from "./cancel";
+import { runLogs } from "./logs";
+import { runRerun } from "./rerun";
+import { runWait } from "./wait";
 import {
   formatStatusDetails,
   formatStatusSummary,
@@ -26,6 +31,7 @@ type StatusOptions = {
   job?: string;
   jobUrl?: string;
   nonInteractive: boolean;
+  watch?: boolean;
 };
 
 type StatusSelectionResult =
@@ -157,6 +163,27 @@ export async function runStatus(options: StatusOptions): Promise<void> {
       });
       const details = formatStatusDetails(toStatusDetails(status), url);
       printOk(details ? `${summary}\n${details}` : summary);
+
+      if (options.watch) {
+        await runWait({
+          client: options.client,
+          env: options.env,
+          jobUrl: target.jobUrl,
+          nonInteractive: false,
+          suppressExitCode: true,
+        });
+      }
+    }
+
+    if (targets.length === 1) {
+      const target = targets[0];
+      if (target) {
+        await runStatusActionMenu({
+          client: options.client,
+          env: options.env,
+          target,
+        });
+      }
     }
 
     const runAgain = await confirm({
@@ -246,6 +273,16 @@ async function runStatusOnce(options: StatusOptions): Promise<void> {
   });
   const details = formatStatusDetails(toStatusDetails(status), url);
   printOk(details ? `${summary}\n${details}` : summary);
+
+  if (options.watch) {
+    await runWait({
+      client: options.client,
+      env: options.env,
+      jobUrl,
+      nonInteractive: true,
+      suppressExitCode: false,
+    });
+  }
 }
 
 async function promptForJobSelection(
@@ -462,6 +499,79 @@ function shouldRetryJobSearch(error: CliError): boolean {
     return true;
   }
   return error.message.startsWith("No jobs match ");
+}
+
+async function runStatusActionMenu(options: {
+  client: JenkinsClient;
+  env: EnvConfig;
+  target: { jobUrl: string; jobLabel: string };
+}): Promise<void> {
+  while (true) {
+    const action = await select({
+      message: `Action for ${options.target.jobLabel}`,
+      options: [
+        { value: "watch", label: "Watch" },
+        { value: "logs", label: "Logs" },
+        { value: "cancel", label: "Cancel running/queued build" },
+        { value: "rerun", label: "Rerun last failed build" },
+        { value: "build", label: "Build now" },
+        { value: "done", label: "Done" },
+      ],
+    });
+    if (isCancel(action) || action === "done") {
+      return;
+    }
+
+    if (action === "watch") {
+      await runWait({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.target.jobUrl,
+        nonInteractive: false,
+        suppressExitCode: true,
+      });
+      continue;
+    }
+    if (action === "logs") {
+      await runLogs({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.target.jobUrl,
+        follow: true,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "cancel") {
+      await runCancel({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.target.jobUrl,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "rerun") {
+      await runRerun({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.target.jobUrl,
+        nonInteractive: false,
+      });
+      continue;
+    }
+    if (action === "build") {
+      await runBuild({
+        client: options.client,
+        env: options.env,
+        jobUrl: options.target.jobUrl,
+        branchParam: options.env.branchParamDefault,
+        defaultBranch: false,
+        nonInteractive: false,
+      });
+      continue;
+    }
+  }
 }
 
 function ensureValidUrl(value: string, label: string): void {
