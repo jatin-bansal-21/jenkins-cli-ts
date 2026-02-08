@@ -33,7 +33,7 @@ function selectJobHandler({
   input,
 }: {
   context: ListInteractiveContext;
-  input: unknown;
+  input?: unknown;
 }): SelectEvent {
   const value = String(input);
   if (value === SEARCH_AGAIN_VALUE) {
@@ -55,7 +55,7 @@ function selectListActionHandler({
   input,
 }: {
   context: ListInteractiveContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   if (value === "done") {
@@ -84,7 +84,7 @@ function selectBuildActionHandler({
   input,
 }: {
   context: BuildPostContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   if (value === "done") {
@@ -121,7 +121,7 @@ function buildAfterRootHandler({
   return context.returnToCaller ? "return_to_caller_root" : "ask_repeat";
 }
 
-function repeatConfirmHandler({ input }: { input: unknown }): EventId {
+function repeatConfirmHandler({ input }: { input?: unknown }): EventId {
   return input ? "confirm:yes" : "confirm:no";
 }
 
@@ -138,7 +138,7 @@ function selectRecentJobHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   if (value === SEARCH_ALL_JOBS_VALUE) {
@@ -163,7 +163,7 @@ function submitSearchHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const query = String(input ?? "").trim();
   context.searchQuery = query;
@@ -200,7 +200,7 @@ function selectSearchCandidateHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   const selected = context.searchCandidates.find((job) => job.url === value);
@@ -253,7 +253,7 @@ function selectBranchHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   if (value === BRANCH_REMOVE_VALUE && context.removableBranches.length > 0) {
@@ -275,7 +275,7 @@ function selectBranchToRemoveHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const branch = String(input).trim();
   if (!branch) {
@@ -315,7 +315,7 @@ function submitBranchHandler({
   input,
 }: {
   context: BuildPreContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const branch = String(input ?? "").trim();
   if (!branch) {
@@ -332,7 +332,7 @@ function selectStatusActionHandler({
   input,
 }: {
   context: StatusPostContext;
-  input: unknown;
+  input?: unknown;
 }): EventId {
   const value = String(input);
   if (value === "done") {

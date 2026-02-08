@@ -25,41 +25,26 @@ type ListOptions = {
   nonInteractive: boolean;
 };
 
+type ListActionMenuOptions = {
+  client: JenkinsClient;
+  env: EnvConfig;
+  jobs: JenkinsJob[];
+};
+
+type ListActionContext = {
+  client: JenkinsClient;
+  env: EnvConfig;
+  selectedJob: JenkinsJob;
+};
+
 export async function runList(options: ListOptions): Promise<void> {
   const jobs = await listDeps.loadJobs({
     client: options.client,
     env: options.env,
     refresh: options.refresh,
     nonInteractive: options.nonInteractive,
-    confirmRefresh: async (reason) => {
-      const response = await listDeps.confirm({
-        message: `${reason} Refresh now?`,
-        initialValue: true,
-      });
-      if (listDeps.isCancel(response)) {
-        throw new CliError("Operation cancelled.");
-      }
-      return response;
-    },
+    confirmRefresh,
   });
-
-  const printJobs = (entries: JenkinsJob[], search: string): void => {
-    const jobsToPrint = entries;
-
-    if (search && jobsToPrint.length === 0) {
-      printOk(`No jobs match "${search}".`);
-      return;
-    }
-
-    for (const job of jobsToPrint) {
-      console.log(`${listDeps.getJobDisplayName(job)}  ${job.url}`);
-    }
-  };
-
-  const isExitToken = (value: string): boolean => {
-    const normalized = value.trim().toLowerCase();
-    return normalized === "q" || normalized === "quit" || normalized === "exit";
-  };
 
   if (options.nonInteractive) {
     const search = options.search?.trim() ?? "";
@@ -123,89 +108,13 @@ async function promptSearch(initialSearch: string): Promise<string> {
   return String(response).trim();
 }
 
-async function runListActionMenu(options: {
-  client: JenkinsClient;
-  env: EnvConfig;
-  jobs: JenkinsJob[];
-}): Promise<"search" | "exit"> {
+async function runListActionMenu(
+  options: ListActionMenuOptions,
+): Promise<"search" | "exit"> {
   const context: ListInteractiveContext = {
     jobs: options.jobs,
-    performAction: async (action, selectedJob) => {
-      if (action === "build") {
-        return await runMenuAction(async () => {
-          const result = await listDeps.runBuild({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            branchParam: options.env.branchParamDefault,
-            nonInteractive: false,
-            returnToCaller: true,
-          });
-          return result?.rootRequested ? "root" : "action_ok";
-        });
-      }
-      if (action === "status") {
-        return await runMenuAction(async () => {
-          await listDeps.runStatus({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            nonInteractive: true,
-          });
-          return "action_ok";
-        });
-      }
-      if (action === "watch") {
-        return await runMenuAction(async () => {
-          const result = await listDeps.runWait({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            nonInteractive: false,
-            suppressExitCode: true,
-          });
-          if (!result) {
-            return "action_error";
-          }
-          return result.cancelled ? "watch_cancelled" : "action_ok";
-        });
-      }
-      if (action === "logs") {
-        return await runMenuAction(async () => {
-          await listDeps.runLogs({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            follow: true,
-            nonInteractive: false,
-          });
-          return "action_ok";
-        });
-      }
-      if (action === "cancel") {
-        return await runMenuAction(async () => {
-          await listDeps.runCancel({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            nonInteractive: false,
-          });
-          return "action_ok";
-        });
-      }
-      if (action === "rerun") {
-        return await runMenuAction(async () => {
-          await listDeps.runRerun({
-            client: options.client,
-            env: options.env,
-            jobUrl: selectedJob.url,
-            nonInteractive: false,
-          });
-          return "action_ok";
-        });
-      }
-      return "action_error";
-    },
+    performAction: (action, selectedJob) =>
+      performListAction(options, action, selectedJob),
   };
 
   const result = await runFlow({
@@ -226,11 +135,148 @@ async function runListActionMenu(options: {
   return "search";
 }
 
-async function runMenuAction<T extends ActionEffectResult>(
-  action: () => Promise<T>,
+async function confirmRefresh(reason: string): Promise<boolean> {
+  const response = await listDeps.confirm({
+    message: `${reason} Refresh now?`,
+    initialValue: true,
+  });
+  if (listDeps.isCancel(response)) {
+    throw new CliError("Operation cancelled.");
+  }
+  return response;
+}
+
+function printJobs(entries: JenkinsJob[], search: string): void {
+  if (search && entries.length === 0) {
+    printOk(`No jobs match "${search}".`);
+    return;
+  }
+
+  for (const job of entries) {
+    console.log(`${listDeps.getJobDisplayName(job)}  ${job.url}`);
+  }
+}
+
+function isExitToken(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "q" || normalized === "quit" || normalized === "exit";
+}
+
+async function performListAction(
+  options: ListActionMenuOptions,
+  action: string,
+  selectedJob: JenkinsJob,
+): Promise<ActionEffectResult> {
+  const context: ListActionContext = {
+    client: options.client,
+    env: options.env,
+    selectedJob,
+  };
+
+  switch (action) {
+    case "build":
+      return await runMenuAction(runBuildAction, context);
+    case "status":
+      return await runMenuAction(runStatusAction, context);
+    case "watch":
+      return await runMenuAction(runWatchAction, context);
+    case "logs":
+      return await runMenuAction(runLogsAction, context);
+    case "cancel":
+      return await runMenuAction(runCancelAction, context);
+    case "rerun":
+      return await runMenuAction(runRerunAction, context);
+    default:
+      return "action_error";
+  }
+}
+
+async function runBuildAction(
+  context: ListActionContext,
+): Promise<ActionEffectResult> {
+  const result = await listDeps.runBuild({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    branchParam: context.env.branchParamDefault,
+    nonInteractive: false,
+    returnToCaller: true,
+  });
+  return result?.rootRequested ? "root" : "action_ok";
+}
+
+async function runStatusAction(
+  context: ListActionContext,
+): Promise<"action_ok"> {
+  await listDeps.runStatus({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    nonInteractive: true,
+  });
+  return "action_ok";
+}
+
+async function runWatchAction(
+  context: ListActionContext,
+): Promise<ActionEffectResult> {
+  const result = await listDeps.runWait({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    nonInteractive: false,
+    suppressExitCode: true,
+  });
+  if (!result) {
+    return "action_error";
+  }
+  return result.cancelled ? "watch_cancelled" : "action_ok";
+}
+
+async function runLogsAction(context: ListActionContext): Promise<"action_ok"> {
+  await listDeps.runLogs({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    follow: true,
+    nonInteractive: false,
+  });
+  return "action_ok";
+}
+
+async function runCancelAction(
+  context: ListActionContext,
+): Promise<"action_ok"> {
+  await listDeps.runCancel({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    nonInteractive: false,
+  });
+  return "action_ok";
+}
+
+async function runRerunAction(
+  context: ListActionContext,
+): Promise<"action_ok"> {
+  await listDeps.runRerun({
+    client: context.client,
+    env: context.env,
+    jobUrl: context.selectedJob.url,
+    nonInteractive: false,
+  });
+  return "action_ok";
+}
+
+async function runMenuAction<
+  T extends ActionEffectResult,
+  TArgs extends unknown[],
+>(
+  action: (...args: TArgs) => Promise<T>,
+  ...args: TArgs
 ): Promise<T | "action_error"> {
   try {
-    return await action();
+    return await action(...args);
   } catch (error) {
     if (error instanceof CliError) {
       printError(error.message);
