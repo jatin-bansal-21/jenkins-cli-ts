@@ -25,7 +25,7 @@ import {
 } from "../jobs";
 import { loadRecentJobs, recordRecentJob } from "../recent-jobs";
 import { runFlow } from "../flows/runner";
-import { flowDefinitions } from "../flows/definition";
+import { flows } from "../flows/definition";
 import { statusFlowHandlers } from "../flows/handlers";
 import type { ActionEffectResult, StatusPostContext } from "../flows/types";
 
@@ -251,7 +251,7 @@ export async function runStatus(options: StatusOptions): Promise<void> {
     };
 
     const postResult = await runFlow({
-      definition: flowDefinitions.status_post,
+      definition: flows.statusPost,
       handlers: statusFlowHandlers,
       prompts: { confirm, isCancel, select, text },
       context: postContext,

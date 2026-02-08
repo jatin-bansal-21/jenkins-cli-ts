@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { flowDefinitions } from "../src/flows/definition";
+import { flows } from "../src/flows/definition";
 import {
   buildFlowHandlers,
   buildPreFlowHandlers,
   listFlowHandlers,
 } from "../src/flows/handlers";
+import { SEARCH_ALL_JOBS_VALUE } from "../src/flows/constants";
 import { runFlow } from "../src/flows/runner";
 import type {
   BuildPreContext,
@@ -34,7 +35,7 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.build_post,
+      definition: flows.buildPost,
       handlers: buildFlowHandlers,
       prompts: createPromptAdapter([CANCEL]),
       context,
@@ -52,7 +53,7 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.build_post,
+      definition: flows.buildPost,
       handlers: buildFlowHandlers,
       prompts: createPromptAdapter([CANCEL, false]),
       context,
@@ -68,7 +69,7 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.list_interactive,
+      definition: flows.listInteractive,
       handlers: listFlowHandlers,
       prompts: createPromptAdapter([
         "https://jenkins.example.com/job/api/",
@@ -87,7 +88,7 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.list_interactive,
+      definition: flows.listInteractive,
       handlers: listFlowHandlers,
       prompts: createPromptAdapter([
         "https://jenkins.example.com/job/api/",
@@ -107,7 +108,7 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.build_post,
+      definition: flows.buildPost,
       handlers: buildFlowHandlers,
       prompts: createPromptAdapter(["done", true]),
       context,
@@ -131,13 +132,9 @@ describe("flow runner", () => {
     };
 
     const result = await runFlow({
-      definition: flowDefinitions.build_pre,
+      definition: flows.buildPre,
       handlers: buildPreFlowHandlers,
-      prompts: createPromptAdapter([
-        "__jenkins_cli_search_all__",
-        CANCEL,
-        CANCEL,
-      ]),
+      prompts: createPromptAdapter([SEARCH_ALL_JOBS_VALUE, CANCEL, CANCEL]),
       context,
     });
 

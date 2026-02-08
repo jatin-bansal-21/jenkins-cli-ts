@@ -9,7 +9,7 @@ import type { JenkinsJob } from "../types/jenkins";
 import { MIN_SCORE } from "../config/fuzzy";
 import { listDeps } from "./list-deps";
 import { runFlow } from "../flows/runner";
-import { flowDefinitions } from "../flows/definition";
+import { flows } from "../flows/definition";
 import { listFlowHandlers } from "../flows/handlers";
 import type {
   ActionEffectResult,
@@ -209,7 +209,7 @@ async function runListActionMenu(options: {
   };
 
   const result = await runFlow({
-    definition: flowDefinitions.list_interactive,
+    definition: flows.listInteractive,
     handlers: listFlowHandlers,
     prompts: {
       select: listDeps.select,

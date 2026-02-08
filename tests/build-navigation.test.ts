@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { EnvConfig } from "../src/env";
+import { SEARCH_ALL_JOBS_VALUE } from "../src/flows/constants";
 import type { JenkinsClient } from "../src/jenkins/client";
 
 const CANCEL = "__mock_cancel__";
-const SEARCH_ALL_JOBS_ACTION = "__jenkins_cli_search_all__";
 const JOB_URL = "https://jenkins.example.com/job/alpha/";
 const BUILD_URL = "https://jenkins.example.com/job/alpha/42/";
 const QUEUE_URL = "https://jenkins.example.com/queue/item/123/";
@@ -152,7 +152,7 @@ describe("build command navigation", () => {
     }));
 
     selectMock
-      .mockImplementationOnce(async () => SEARCH_ALL_JOBS_ACTION)
+      .mockImplementationOnce(async () => SEARCH_ALL_JOBS_VALUE)
       .mockImplementationOnce(async () => JOB_URL);
     textMock.mockImplementationOnce(async () => CANCEL);
 

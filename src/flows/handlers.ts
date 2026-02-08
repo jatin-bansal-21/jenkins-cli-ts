@@ -1,7 +1,7 @@
 import type {
+  ActionEffectResult,
   BuildPreContext,
   BuildPostContext,
-  EventId,
   FlowHandlerRegistry,
   ListInteractiveContext,
   StatusPostContext,
@@ -13,22 +13,57 @@ import {
   removeCachedBranch,
 } from "../branches";
 import { getJobDisplayName, resolveJobCandidates } from "../jobs";
+import {
+  BRANCH_CUSTOM_VALUE,
+  BRANCH_REMOVE_VALUE,
+  EXIT_VALUE,
+  SEARCH_AGAIN_VALUE,
+  SEARCH_ALL_JOBS_VALUE,
+} from "./constants";
 
-const SEARCH_ALL_JOBS_VALUE = "__jenkins_cli_search_all__";
-const BRANCH_CUSTOM_VALUE = "__jenkins_cli_custom_branch__";
-const BRANCH_REMOVE_VALUE = "__jenkins_cli_remove_branch__";
+type SelectEvent = `select:${string}`;
+type ConfirmEvent = "confirm:yes" | "confirm:no";
 
-function resolveSelectEvent(input: string): EventId {
+type ListSelectJobEvent = "select:search_again" | "select:exit" | "select:job";
+type ListSelectActionEvent = "done" | SelectEvent;
+
+type BuildSelectActionEvent = "done" | SelectEvent;
+type BuildAfterMenuEvent = "return_to_caller" | "ask_repeat";
+type BuildAfterRootEvent = "return_to_caller_root" | "ask_repeat";
+
+type BuildPreEntryEvent = "show_recent" | "search_direct";
+type BuildPreSelectRecentJobEvent = "select:search_all" | "select:recent";
+type BuildPreSubmitSearchEvent =
+  | "search:retry"
+  | "search:candidates"
+  | "search:auto";
+type BuildPreSelectSearchCandidateEvent = "select:search_again" | "select:job";
+type BuildPrePrepareBranchEvent =
+  | "branch:ready"
+  | "branch:select"
+  | "branch:entry"
+  | "branch:error";
+type BuildPreSelectBranchEvent =
+  | "branch:remove"
+  | "branch:entry"
+  | "branch:selected";
+type BuildPreSelectBranchToRemoveEvent = "remove:selected";
+type BuildPreRemoveBranchEvent = "remove:done";
+type BuildPreSubmitBranchEvent = "branch:retry" | "branch:selected";
+
+type StatusSelectActionEvent = "done" | SelectEvent;
+
+function resolveSelectEvent<T extends string>(input: T): `select:${T}` {
   return `select:${input}`;
 }
 
-export const listFlowHandlers: FlowHandlerRegistry<ListInteractiveContext> = {
-  "list.selectJob": ({ context, input }) => {
+export const listFlowHandlers = {
+  "list.selectJob": ({ context, input }): ListSelectJobEvent => {
     const value = String(input);
-    if (value === "__jenkins_cli_search_again__") {
+    if (value === SEARCH_AGAIN_VALUE) {
       return "select:search_again";
     }
-    if (value === "__jenkins_cli_exit__") {
+    if (value === EXIT_VALUE) {
       return "select:exit";
     }
     const selectedJob = context.jobs.find((job) => job.url === value);
@@ -38,7 +73,7 @@ export const listFlowHandlers: FlowHandlerRegistry<ListInteractiveContext> = {
     context.selectedJob = selectedJob;
     return "select:job";
   },
-  "list.selectAction": ({ context, input }) => {
+  "list.selectAction": ({ context, input }): ListSelectActionEvent => {
     const value = String(input);
     if (value === "done") {
       return "done";
@@ -46,7 +81,7 @@ export const listFlowHandlers: FlowHandlerRegistry<ListInteractiveContext> = {
     context.selectedAction = value;
     return resolveSelectEvent(value);
   },
-  "list.runAction": async ({ context }) => {
+  "list.runAction": async ({ context }): Promise<ActionEffectResult> => {
     if (!context.selectedJob || !context.selectedAction) {
       return "action_error";
     }
@@ -55,10 +90,10 @@ export const listFlowHandlers: FlowHandlerRegistry<ListInteractiveContext> = {
       context.selectedJob,
     );
   },
-};
+} satisfies FlowHandlerRegistry<ListInteractiveContext>;
 
-export const buildFlowHandlers: FlowHandlerRegistry<BuildPostContext> = {
-  "build.selectAction": ({ context, input }) => {
+export const buildFlowHandlers = {
+  "build.selectAction": ({ context, input }): BuildSelectActionEvent => {
     const value = String(input);
     if (value === "done") {
       return "done";
@@ -66,23 +101,27 @@ export const buildFlowHandlers: FlowHandlerRegistry<BuildPostContext> = {
     context.selectedAction = value;
     return resolveSelectEvent(value);
   },
-  "build.runAction": async ({ context }) => {
+  "build.runAction": async ({ context }): Promise<ActionEffectResult> => {
     if (!context.selectedAction) {
       return "action_error";
     }
     return await context.performAction(context.selectedAction);
   },
-  "build.afterMenu": ({ context }) =>
+  "build.afterMenu": ({ context }): BuildAfterMenuEvent =>
     context.returnToCaller ? "return_to_caller" : "ask_repeat",
-  "build.afterRoot": ({ context }) =>
+  "build.afterRoot": ({ context }): BuildAfterRootEvent =>
     context.returnToCaller ? "return_to_caller_root" : "ask_repeat",
-  "build.repeatConfirm": ({ input }) => (input ? "confirm:yes" : "confirm:no"),
-};
+  "build.repeatConfirm": ({ input }): ConfirmEvent =>
+    input ? "confirm:yes" : "confirm:no",
+} satisfies FlowHandlerRegistry<BuildPostContext>;
 
-export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
-  "buildPre.entry": ({ context }) =>
+export const buildPreFlowHandlers = {
+  "buildPre.entry": ({ context }): BuildPreEntryEvent =>
     context.recentJobs.length > 0 ? "show_recent" : "search_direct",
-  "buildPre.selectRecentJob": ({ context, input }) => {
+  "buildPre.selectRecentJob": ({
+    context,
+    input,
+  }): BuildPreSelectRecentJobEvent => {
     const value = String(input);
     if (value === SEARCH_ALL_JOBS_VALUE) {
       return "select:search_all";
@@ -100,7 +139,7 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     context.searchCandidates = [];
     return "select:recent";
   },
-  "buildPre.submitSearch": ({ context, input }) => {
+  "buildPre.submitSearch": ({ context, input }): BuildPreSubmitSearchEvent => {
     const query = String(input ?? "").trim();
     context.searchQuery = query;
     if (!query) {
@@ -130,7 +169,10 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
       throw error;
     }
   },
-  "buildPre.selectSearchCandidate": ({ context, input }) => {
+  "buildPre.selectSearchCandidate": ({
+    context,
+    input,
+  }): BuildPreSelectSearchCandidateEvent => {
     const value = String(input);
     const selected = context.searchCandidates.find((job) => job.url === value);
     if (!selected) {
@@ -141,7 +183,9 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     context.searchCandidates = [];
     return "select:job";
   },
-  "buildPre.prepareBranch": async ({ context }) => {
+  "buildPre.prepareBranch": async ({
+    context,
+  }): Promise<BuildPrePrepareBranchEvent> => {
     const branch = context.branch?.trim() ?? "";
     if (context.defaultBranch || branch) {
       context.branch = branch;
@@ -171,7 +215,7 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
 
     return choices.length > 0 ? "branch:select" : "branch:entry";
   },
-  "buildPre.selectBranch": ({ context, input }) => {
+  "buildPre.selectBranch": ({ context, input }): BuildPreSelectBranchEvent => {
     const value = String(input);
     if (value === BRANCH_REMOVE_VALUE && context.removableBranches.length > 0) {
       return "branch:remove";
@@ -186,7 +230,10 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     context.branch = branch;
     return "branch:selected";
   },
-  "buildPre.selectBranchToRemove": ({ context, input }) => {
+  "buildPre.selectBranchToRemove": ({
+    context,
+    input,
+  }): BuildPreSelectBranchToRemoveEvent => {
     const branch = String(input).trim();
     if (!branch) {
       return "remove:selected";
@@ -194,7 +241,9 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     context.pendingBranchRemoval = branch;
     return "remove:selected";
   },
-  "buildPre.removeBranch": async ({ context }) => {
+  "buildPre.removeBranch": async ({
+    context,
+  }): Promise<BuildPreRemoveBranchEvent> => {
     const jobUrl = context.selectedJobUrl?.trim() ?? "";
     const branch = context.pendingBranchRemoval?.trim() ?? "";
     context.pendingBranchRemoval = undefined;
@@ -217,7 +266,7 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     }
     return "remove:done";
   },
-  "buildPre.submitBranch": ({ context, input }) => {
+  "buildPre.submitBranch": ({ context, input }): BuildPreSubmitBranchEvent => {
     const branch = String(input ?? "").trim();
     if (!branch) {
       printError("Branch is required to trigger a build.");
@@ -227,10 +276,10 @@ export const buildPreFlowHandlers: FlowHandlerRegistry<BuildPreContext> = {
     context.branch = branch;
     return "branch:selected";
   },
-};
+} satisfies FlowHandlerRegistry<BuildPreContext>;
 
-export const statusFlowHandlers: FlowHandlerRegistry<StatusPostContext> = {
-  "status.selectAction": ({ context, input }) => {
+export const statusFlowHandlers = {
+  "status.selectAction": ({ context, input }): StatusSelectActionEvent => {
     const value = String(input);
     if (value === "done") {
       return "done";
@@ -238,21 +287,15 @@ export const statusFlowHandlers: FlowHandlerRegistry<StatusPostContext> = {
     context.selectedAction = value;
     return resolveSelectEvent(value);
   },
-  "status.runAction": async ({ context }) => {
+  "status.runAction": async ({ context }): Promise<ActionEffectResult> => {
     if (!context.selectedAction) {
       return "action_error";
     }
     return await context.performAction(context.selectedAction);
   },
-  "status.repeatConfirm": ({ input }) => (input ? "confirm:yes" : "confirm:no"),
-};
-
-export const flowHandlerRegistry = {
-  list_interactive: listFlowHandlers,
-  build_pre: buildPreFlowHandlers,
-  build_post: buildFlowHandlers,
-  status_post: statusFlowHandlers,
-};
+  "status.repeatConfirm": ({ input }): ConfirmEvent =>
+    input ? "confirm:yes" : "confirm:no",
+} satisfies FlowHandlerRegistry<StatusPostContext>;
 
 function shouldRetryJobSearch(error: CliError): boolean {
   if (error.message === "Job name is required.") {

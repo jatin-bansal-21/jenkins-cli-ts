@@ -5,19 +5,20 @@ import type {
   ListInteractiveContext,
   StatusPostContext,
 } from "./types";
-
-const SEARCH_AGAIN_VALUE = "__jenkins_cli_search_again__";
-const EXIT_VALUE = "__jenkins_cli_exit__";
-const SEARCH_ALL_JOBS_VALUE = "__jenkins_cli_search_all__";
-const BRANCH_CUSTOM_VALUE = "__jenkins_cli_custom_branch__";
-const BRANCH_REMOVE_VALUE = "__jenkins_cli_remove_branch__";
+import {
+  BRANCH_CUSTOM_VALUE,
+  BRANCH_REMOVE_VALUE,
+  EXIT_VALUE,
+  SEARCH_AGAIN_VALUE,
+  SEARCH_ALL_JOBS_VALUE,
+} from "./constants";
 
 export const listInteractiveFlow: FlowDefinition<ListInteractiveContext> = {
-  id: "list_interactive",
+  id: "listInteractive",
   initialState: "select_job",
   states: {
+    /** Root selector for choosing a job, searching again, or exiting. */
     select_job: {
-      id: "select_job",
       root: true,
       prompt: {
         kind: "select",
@@ -39,8 +40,8 @@ export const listInteractiveFlow: FlowDefinition<ListInteractiveContext> = {
         "select:job": "action_menu",
       },
     },
+    /** Action picker for the currently selected job. */
     action_menu: {
-      id: "action_menu",
       prompt: {
         kind: "select",
         message: (context) =>
@@ -69,8 +70,8 @@ export const listInteractiveFlow: FlowDefinition<ListInteractiveContext> = {
         "select:rerun": "run_action",
       },
     },
+    /** Executes the selected action and routes based on action outcome. */
     run_action: {
-      id: "run_action",
       onEnter: "list.runAction",
       transitions: {
         action_ok: "action_menu",
@@ -84,19 +85,19 @@ export const listInteractiveFlow: FlowDefinition<ListInteractiveContext> = {
 };
 
 export const buildPreFlow: FlowDefinition<BuildPreContext> = {
-  id: "build_pre",
+  id: "buildPre",
   initialState: "entry",
   states: {
+    /** Entry router that decides recent-jobs flow vs direct search flow. */
     entry: {
-      id: "entry",
       onEnter: "buildPre.entry",
       transitions: {
         show_recent: "recent_menu",
         search_direct: "search_direct",
       },
     },
+    /** Root menu for picking a recent job or switching to full search. */
     recent_menu: {
-      id: "recent_menu",
       root: true,
       prompt: {
         kind: "select",
@@ -116,8 +117,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "select:recent": "prepare_branch",
       },
     },
+    /** Search prompt reached from the recent-jobs menu. */
     search_from_recent: {
-      id: "search_from_recent",
       prompt: {
         kind: "text",
         message: "Job name or description",
@@ -132,8 +133,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "search:auto": "prepare_branch",
       },
     },
+    /** Root search prompt used when build starts without a preset job. */
     search_direct: {
-      id: "search_direct",
       root: true,
       prompt: {
         kind: "text",
@@ -149,8 +150,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "search:auto": "prepare_branch",
       },
     },
+    /** Candidate list after searching from the recent-jobs path. */
     results_from_recent: {
-      id: "results_from_recent",
       prompt: {
         kind: "select",
         message: "Select a job (press Esc to search again)",
@@ -167,8 +168,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "select:job": "prepare_branch",
       },
     },
+    /** Candidate list after searching from the direct-search path. */
     results_direct: {
-      id: "results_direct",
       prompt: {
         kind: "select",
         message: "Select a job (press Esc to search again)",
@@ -185,8 +186,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "select:job": "prepare_branch",
       },
     },
+    /** Loads branch metadata and decides if branch input is needed. */
     prepare_branch: {
-      id: "prepare_branch",
       onEnter: "buildPre.prepareBranch",
       transitions: {
         "branch:ready": "complete",
@@ -195,8 +196,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "branch:error": "entry",
       },
     },
+    /** Branch chooser with cached branches and utility actions. */
     branch_select: {
-      id: "branch_select",
       prompt: {
         kind: "select",
         message: "Branch name (press Esc to choose another job)",
@@ -219,8 +220,8 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "branch:remove": "branch_remove",
       },
     },
+    /** Menu for selecting which cached branch entry to remove. */
     branch_remove: {
-      id: "branch_remove",
       prompt: {
         kind: "select",
         message: "Remove cached branch",
@@ -236,15 +237,15 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
         "remove:selected": "branch_remove_apply",
       },
     },
+    /** Applies cached-branch removal, then returns to branch selection. */
     branch_remove_apply: {
-      id: "branch_remove_apply",
       onEnter: "buildPre.removeBranch",
       transitions: {
         "remove:done": "branch_select",
       },
     },
+    /** Free-text branch input when the desired branch is not listed. */
     branch_entry: {
-      id: "branch_entry",
       prompt: {
         kind: "text",
         message: "Branch name",
@@ -261,11 +262,11 @@ export const buildPreFlow: FlowDefinition<BuildPreContext> = {
 };
 
 export const buildPostFlow: FlowDefinition<BuildPostContext> = {
-  id: "build_post",
+  id: "buildPost",
   initialState: "action_menu",
   states: {
+    /** Post-build action menu for follow-up operations on the same job. */
     action_menu: {
-      id: "action_menu",
       prompt: {
         kind: "select",
         message: (context) => `Next action for ${context.jobLabel}`,
@@ -287,8 +288,8 @@ export const buildPostFlow: FlowDefinition<BuildPostContext> = {
         "select:rerun": "run_action",
       },
     },
+    /** Executes the chosen post-build action and handles its result. */
     run_action: {
-      id: "run_action",
       onEnter: "build.runAction",
       transitions: {
         action_ok: "action_menu",
@@ -298,24 +299,24 @@ export const buildPostFlow: FlowDefinition<BuildPostContext> = {
         exit: "exit_command",
       },
     },
+    /** Resolves where to return after leaving the post-build menu. */
     after_menu: {
-      id: "after_menu",
       onEnter: "build.afterMenu",
       transitions: {
         ask_repeat: "repeat_confirm",
         return_to_caller: "return_to_caller",
       },
     },
+    /** Resolves root-return behavior after action-driven interruption. */
     after_root: {
-      id: "after_root",
       onEnter: "build.afterRoot",
       transitions: {
         ask_repeat: "repeat_confirm",
         return_to_caller_root: "return_to_caller_root",
       },
     },
+    /** Root confirmation prompt to optionally run another build. */
     repeat_confirm: {
-      id: "repeat_confirm",
       root: true,
       prompt: {
         kind: "confirm",
@@ -333,11 +334,11 @@ export const buildPostFlow: FlowDefinition<BuildPostContext> = {
 };
 
 export const statusPostFlow: FlowDefinition<StatusPostContext> = {
-  id: "status_post",
+  id: "statusPost",
   initialState: "action_menu",
   states: {
+    /** Post-status action menu for follow-up operations on the target. */
     action_menu: {
-      id: "action_menu",
       prompt: {
         kind: "select",
         message: (context) => `Action for ${context.targetLabel}`,
@@ -361,8 +362,8 @@ export const statusPostFlow: FlowDefinition<StatusPostContext> = {
         "select:build": "run_action",
       },
     },
+    /** Executes status follow-up action and routes on outcome. */
     run_action: {
-      id: "run_action",
       onEnter: "status.runAction",
       transitions: {
         action_ok: "action_menu",
@@ -372,8 +373,8 @@ export const statusPostFlow: FlowDefinition<StatusPostContext> = {
         exit: "exit_command",
       },
     },
+    /** Root confirmation prompt to optionally inspect another job. */
     again_confirm: {
-      id: "again_confirm",
       root: true,
       prompt: {
         kind: "confirm",
@@ -390,9 +391,10 @@ export const statusPostFlow: FlowDefinition<StatusPostContext> = {
   },
 };
 
-export const flowDefinitions = {
-  list_interactive: listInteractiveFlow,
-  build_pre: buildPreFlow,
-  build_post: buildPostFlow,
-  status_post: statusPostFlow,
+/** Preferred registry with readable camelCase keys for direct imports/usage. */
+export const flows = {
+  listInteractive: listInteractiveFlow,
+  buildPre: buildPreFlow,
+  buildPost: buildPostFlow,
+  statusPost: statusPostFlow,
 };

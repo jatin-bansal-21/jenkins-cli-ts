@@ -235,6 +235,11 @@ bash setup.sh
 
 Commands print `OK:` on success.
 
+## Docs
+
+- Build flow walkthrough: `docs/flow/build-flow.md`
+- Prompt architecture and dependencies: `docs/flow/prompt-system.md`
+
 ## Notes
 
 - Job lists are cached in the OS cache directory. Use `--refresh` to update.

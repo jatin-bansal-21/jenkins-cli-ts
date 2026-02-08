@@ -9,6 +9,7 @@ import {
 } from "bun:test";
 import { CliError } from "../src/cli";
 import type { EnvConfig } from "../src/env";
+import { EXIT_VALUE } from "../src/flows/constants";
 import type { JenkinsClient } from "../src/jenkins/client";
 import type { JenkinsJob } from "../src/types/jenkins";
 
@@ -20,7 +21,7 @@ const jobs: JenkinsJob[] = [
 const loadJobsMock = mock(async () => jobs);
 const confirmMock = mock(() => true);
 const isCancelMock = mock(() => false);
-const selectMock = mock(async () => "__jenkins_cli_exit__");
+const selectMock = mock(async () => EXIT_VALUE);
 const textMock = mock(async () => "q");
 
 const runBuildMock = mock(async () => undefined);
@@ -64,7 +65,7 @@ describe("runList", () => {
     isCancelMock.mockReset();
     isCancelMock.mockImplementation(() => false);
     selectMock.mockReset();
-    selectMock.mockImplementation(async () => "__jenkins_cli_exit__");
+    selectMock.mockImplementation(async () => EXIT_VALUE);
     textMock.mockReset();
     textMock.mockImplementation(async () => "q");
 
@@ -107,7 +108,7 @@ describe("runList", () => {
 
   test("interactive uses initial search and exits from menu", async () => {
     const logSpy = spyOn(console, "log");
-    selectMock.mockImplementationOnce(async () => "__jenkins_cli_exit__");
+    selectMock.mockImplementationOnce(async () => EXIT_VALUE);
 
     await runList({
       client: {} as JenkinsClient,

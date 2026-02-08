@@ -1,16 +1,20 @@
 import type { JenkinsJob } from "../types/jenkins";
 import type { EnvConfig } from "../env";
 
+/** All supported interactive flow definitions in the CLI. */
 export type FlowId =
-  | "list_interactive"
-  | "build_pre"
-  | "build_post"
-  | "status_post";
+  | "listInteractive"
+  | "buildPre"
+  | "buildPost"
+  | "statusPost";
 
+/** Unique identifier for a state within a flow definition. */
 export type StateId = string;
 
+/** Event key used to resolve state transitions. */
 export type EventId = string;
 
+/** Terminal outcomes that stop flow execution. */
 export type TerminalState =
   | "exit_command"
   | "return_to_caller"
@@ -19,53 +23,68 @@ export type TerminalState =
   | "root"
   | "complete";
 
+/** Primitive prompt values returned by the prompt adapter. */
 export type FlowPromptValue = string | boolean;
 
+/** Select-option shape used by `select` prompts. */
 export type PromptOption = {
   value: string;
   label: string;
 };
 
+/** Declarative prompt spec for a flow state. */
 export type PromptSpec<Ctx> =
   | {
+      /** Option picker prompt. */
       kind: "select";
       message: string | ((context: Ctx) => string);
       options: PromptOption[] | ((context: Ctx) => PromptOption[]);
     }
   | {
+      /** Yes/no confirmation prompt. */
       kind: "confirm";
       message: string | ((context: Ctx) => string);
       initialValue?: boolean | ((context: Ctx) => boolean);
     }
   | {
+      /** Free-form text input prompt. */
       kind: "text";
       message: string | ((context: Ctx) => string);
       placeholder?: string | ((context: Ctx) => string);
       initialValue?: string | ((context: Ctx) => string);
     };
 
+/** Single state in a flow state machine. */
 export type StateDefinition<Ctx> = {
-  id: StateId;
+  /** Marks state as a root/return point for escape-driven navigation. */
   root?: boolean;
+  /** Prompt shown in this state (if state is prompt-driven). */
   prompt?: PromptSpec<Ctx>;
+  /** Handler called automatically when entering the state. */
   onEnter?: string;
+  /** Handler called after prompt value is captured. */
   onSelect?: string;
+  /** Event -> next state/terminal transition map. */
   transitions: Record<string, StateId | TerminalState>;
 };
 
+/** Full declarative state machine for a command flow. */
 export type FlowDefinition<Ctx> = {
   id: FlowId;
   initialState: StateId;
   states: Record<StateId, StateDefinition<Ctx>>;
 };
 
+/** Handler contract used by flow runner for `onEnter` and `onSelect`. */
 export type FlowHandler<Ctx> = (options: {
   context: Ctx;
   input?: FlowPromptValue;
 }) => Promise<EventId> | EventId;
 
+/** Registry that maps handler ids to implementations. */
 export type FlowHandlerRegistry<Ctx> = Record<string, FlowHandler<Ctx>>;
 
+/** Prompt runtime adapter (implemented with `@clack/prompts`). */
 export type PromptAdapter = {
   select: (options: {
     message: string;
@@ -80,15 +99,18 @@ export type PromptAdapter = {
     placeholder?: string;
     defaultValue?: string;
   }) => Promise<unknown>;
+  /** Returns true for Escape/Ctrl+C cancel payloads from the prompt library. */
   isCancel: (value: unknown) => boolean;
 };
 
+/** Final output from `runFlow(...)`. */
 export type FlowRunResult<Ctx> = {
   terminal: TerminalState;
   stateId: StateId;
   context: Ctx;
 };
 
+/** Standardized outcomes for command action handlers used in menus. */
 export type ActionEffectResult =
   | "action_ok"
   | "watch_cancelled"
@@ -96,6 +118,7 @@ export type ActionEffectResult =
   | "root"
   | "exit";
 
+/** Runtime context for `listInteractive` flow. */
 export type ListInteractiveContext = {
   jobs: JenkinsJob[];
   selectedJob?: JenkinsJob;
@@ -106,6 +129,7 @@ export type ListInteractiveContext = {
   ) => Promise<ActionEffectResult>;
 };
 
+/** Runtime context for `buildPost` flow. */
 export type BuildPostContext = {
   jobLabel: string;
   returnToCaller: boolean;
@@ -113,6 +137,7 @@ export type BuildPostContext = {
   performAction: (action: string) => Promise<ActionEffectResult>;
 };
 
+/** Runtime context for `buildPre` flow (job/branch selection). */
 export type BuildPreContext = {
   env: EnvConfig;
   jobs: JenkinsJob[];
@@ -128,6 +153,7 @@ export type BuildPreContext = {
   pendingBranchRemoval?: string;
 };
 
+/** Runtime context for `statusPost` flow. */
 export type StatusPostContext = {
   targetLabel: string;
   selectedAction?: string;

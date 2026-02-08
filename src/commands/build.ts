@@ -32,7 +32,8 @@ import {
 } from "../status-format";
 import { waitForPollIntervalOrCancel } from "./watch-utils";
 import { runFlow } from "../flows/runner";
-import { flowDefinitions } from "../flows/definition";
+import { flows } from "../flows/definition";
+import { BRANCH_CUSTOM_VALUE, BRANCH_REMOVE_VALUE } from "../flows/constants";
 import { buildFlowHandlers, buildPreFlowHandlers } from "../flows/handlers";
 import type {
   ActionEffectResult,
@@ -323,7 +324,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildRunResult> {
     };
 
     const postBuildResult = await runFlow({
-      definition: flowDefinitions.build_post,
+      definition: flows.buildPost,
       handlers: buildFlowHandlers,
       prompts: { confirm, isCancel, select, text },
       context: flowContext,
@@ -1008,7 +1009,7 @@ async function resolveInteractiveBuildSelection(options: {
   };
 
   const result = await runFlow({
-    definition: flowDefinitions.build_pre,
+    definition: flows.buildPre,
     handlers: buildPreFlowHandlers,
     prompts: { confirm, isCancel, select, text },
     context,
@@ -1137,22 +1138,20 @@ async function promptForBranchSelection(options: {
   choices: string[];
   removableBranches: string[];
 }): Promise<string> {
-  const customValue = "__jenkins_cli_custom_branch__";
-  const removeValue = "__jenkins_cli_remove_branch__";
   let choices = dedupeCaseInsensitive(options.choices);
   let removableBranches = dedupeCaseInsensitive(options.removableBranches);
 
   while (true) {
     const selectOptions = [
       ...(removableBranches.length > 0
-        ? [{ value: removeValue, label: "Remove cached branch" }]
+        ? [{ value: BRANCH_REMOVE_VALUE, label: "Remove cached branch" }]
         : []),
       ...choices.map((choice) => ({
         value: choice,
         label: choice,
       })),
       {
-        value: customValue,
+        value: BRANCH_CUSTOM_VALUE,
         label: "Type a different branch",
       },
     ];
@@ -1165,7 +1164,7 @@ async function promptForBranchSelection(options: {
       throw new CliError("Operation cancelled.");
     }
 
-    if (response === removeValue) {
+    if (response === BRANCH_REMOVE_VALUE) {
       const toRemove = await promptForBranchRemoval(removableBranches);
       const removed = await removeCachedBranch({
         env: options.env,
@@ -1179,7 +1178,7 @@ async function promptForBranchSelection(options: {
       continue;
     }
 
-    if (response === customValue) {
+    if (response === BRANCH_CUSTOM_VALUE) {
       return await promptForBranchEntry();
     }
 

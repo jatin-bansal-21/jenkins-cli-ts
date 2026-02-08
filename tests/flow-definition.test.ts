@@ -1,31 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { flowDefinitions } from "../src/flows/definition";
+import { flows } from "../src/flows/definition";
 import { validateFlowDefinition } from "../src/flows/validate";
 
 describe("flow definitions", () => {
   test("all flow definitions pass validation", () => {
-    expect(() =>
-      validateFlowDefinition(flowDefinitions.list_interactive),
-    ).not.toThrow();
-    expect(() =>
-      validateFlowDefinition(flowDefinitions.build_post),
-    ).not.toThrow();
-    expect(() =>
-      validateFlowDefinition(flowDefinitions.build_pre),
-    ).not.toThrow();
-    expect(() =>
-      validateFlowDefinition(flowDefinitions.status_post),
-    ).not.toThrow();
+    expect(() => validateFlowDefinition(flows.listInteractive)).not.toThrow();
+    expect(() => validateFlowDefinition(flows.buildPost)).not.toThrow();
+    expect(() => validateFlowDefinition(flows.buildPre)).not.toThrow();
+    expect(() => validateFlowDefinition(flows.statusPost)).not.toThrow();
   });
 
   test("validator rejects transitions to unknown states", () => {
     expect(() =>
       validateFlowDefinition({
-        id: "list_interactive",
+        id: "listInteractive",
         initialState: "start",
         states: {
           start: {
-            id: "start",
             transitions: {
               next: "missing_state",
             },
