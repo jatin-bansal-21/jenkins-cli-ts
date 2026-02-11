@@ -486,7 +486,6 @@ function validateBuildOptions(options: BuildOptions): void {
       "Remove one of the flags and try again.",
     ]);
   }
-
 }
 
 function resolveCancelTarget(activeBuild: {

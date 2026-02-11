@@ -346,8 +346,6 @@ describe("build command", () => {
     expect(triggerCalls[0]?.[1]).toEqual({});
   });
 
-
-
   test("non-interactive build without branch triggers default branch", async () => {
     const getJobStatus = mock(async () => ({ lastBuildNumber: 380 }));
     const triggerBuild = mock(async () => ({
