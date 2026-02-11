@@ -87,7 +87,6 @@ function createClient(stubs: Partial<JenkinsClient>): JenkinsClient {
 
 describe("build command navigation", () => {
   beforeEach(() => {
-
     confirmMock.mockReset();
     confirmMock.mockImplementation(async () => false);
 
@@ -182,7 +181,6 @@ describe("build command navigation", () => {
     expect(triggerBuild).toHaveBeenCalledTimes(1);
     expect(triggerBuild).toHaveBeenCalledWith(JOB_URL, {});
   });
-
 
   test("interactive branch selection supports using job without parameters", async () => {
     const getJobStatus = mock(async () => ({ lastBuildNumber: 41 }));
