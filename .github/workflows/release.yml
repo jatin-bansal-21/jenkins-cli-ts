@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh repo clone jatinbansal1998/homebrew-tap tap-repo -- --depth 1
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/jatinbansal1998/homebrew-tap.git" tap-repo --depth 1
           mkdir -p tap-repo/Formula
           cp dist/homebrew-jenkins-cli.rb tap-repo/Formula/jenkins-cli.rb
 
