@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -110,11 +112,11 @@ jobs:
 
       - name: Sync formula to homebrew tap
         id: sync_tap
-        if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        if: ${{ env.HOMEBREW_TAP_TOKEN != '' }}
         shell: bash
         env:
           TAG_NAME: ${{ github.ref_name }}
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ env.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -138,13 +140,12 @@ jobs:
         if: always()
         shell: bash
         env:
-          TAP_SECRET_SET: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
           TAP_SYNC_OUTCOME: ${{ steps.sync_tap.outcome }}
         run: |
           {
             echo "## Homebrew tap sync"
             echo ""
-            if [ "$TAP_SECRET_SET" != "true" ]; then
+            if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
               echo "Skipped: \`HOMEBREW_TAP_TOKEN\` is not set."
             elif [ "$TAP_SYNC_OUTCOME" = "success" ]; then
               echo "Success: \`Formula/jenkins-cli.rb\` synced to \`jatinbansal1998/homebrew-tap\`."
