@@ -125,14 +125,14 @@ jobs:
           cp dist/homebrew-jenkins-cli.rb tap-repo/Formula/jenkins-cli.rb
 
           cd tap-repo
-          if git diff --quiet -- Formula/jenkins-cli.rb; then
+          git add Formula/jenkins-cli.rb
+          if git diff --cached --quiet -- Formula/jenkins-cli.rb; then
             echo "No formula changes detected; skipping tap update."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/jenkins-cli.rb
           git commit -m "jenkins-cli ${TAG_NAME}"
           git push origin HEAD:main
 
